@@ -3,7 +3,7 @@ package OnlineShop;
 import java.awt.*;
 
 public class ThemeColors {
-    public static final Color BACKGROUND = new Color(20, 20, 30);
+        public static final Color BACKGROUND = new Color(20, 20, 30);
     public static final Color PRIMARY = new Color(255, 50, 150);
     public static final Color SECONDARY = new Color(180, 50, 220);
     public static final Color TEXT = new Color(240, 240, 240);

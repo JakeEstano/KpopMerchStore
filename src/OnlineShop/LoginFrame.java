@@ -12,7 +12,7 @@ public class LoginFrame extends JFrame {
     private JButton loginButton, registerButton;
 
     public LoginFrame() {
-        setTitle("HAMTEO - Login");
+        setTitle("케이팝 상점  - Login");
         setSize(500, 400);
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setLayout(new GridBagLayout());
@@ -23,8 +23,8 @@ public class LoginFrame extends JFrame {
         getContentPane().setBackground(ThemeColors.BACKGROUND);
 
         // Header
-        JLabel header = new JLabel("HAMTEO", SwingConstants.CENTER);
-        header.setFont(new Font("Arial", Font.BOLD, 36));
+        JLabel header = new JLabel("케이팝 상점", SwingConstants.CENTER);
+        header.setFont(new Font("Nanum Gothic", Font.BOLD, 36));
         header.setForeground(ThemeColors.PRIMARY);
         gbc.gridx = 0; gbc.gridy = 0; gbc.gridwidth = 2;
         add(header, gbc);
