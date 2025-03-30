@@ -6,9 +6,13 @@ import java.awt.*;
 import java.awt.event.*;
 import java.sql.*;
 import com.formdev.flatlaf.FlatDarkLaf;
+import java.awt.image.BufferedImage;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileNotFoundException;
+import java.io.InputStream;
 import java.net.URL;
+import javax.imageio.ImageIO;
 
 public class CustomerFrame extends JFrame {
     private int customerId;
@@ -223,75 +227,129 @@ public class CustomerFrame extends JFrame {
         JPanel homePanel = new JPanel(new BorderLayout());
         homePanel.setBackground(ThemeColors.BACKGROUND);
 
-        // Animated promotion banner
-        JPanel releasePanel = new JPanel(new BorderLayout()) {
-            @Override
-            public Dimension getPreferredSize() {
-                int preferredHeight = Math.min(getParent().getHeight() / 4, 200);
-                return new Dimension(super.getPreferredSize().width, preferredHeight);
-            }
-        };
-        releasePanel.setBackground(ThemeColors.CARD_BG);
-        releasePanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+        // ========== BANNER SECTION ==========
+        JPanel bannerPanel = new JPanel(new BorderLayout());
+        bannerPanel.setBackground(ThemeColors.CARD_BG);
+        bannerPanel.setBorder(BorderFactory.createEmptyBorder(5, 0, 5, 0));
+        bannerPanel.setPreferredSize(new Dimension(1200, 180)); // Default size
 
+        // Load banner image with multiple fallback options
         try {
-            // Try loading from file system first (for development)
-            File imageFile = new File("src/images/promotional.gif");
-            ImageIcon originalIcon;
-            
-            if (imageFile.exists()) {
-                originalIcon = new ImageIcon(imageFile.getAbsolutePath());
-            } else {
-                // Fallback to classpath resource
-                URL imageUrl = getClass().getResource("/images/promotional.gif");
-                if (imageUrl == null) {
-                    throw new FileNotFoundException("Image not found in resources");
-                }
-                originalIcon = new ImageIcon(imageUrl);
+            final ImageIcon[] bannerIconHolder = new ImageIcon[1];
+
+            // 1. Try loading from resources (works in JAR)
+            InputStream imgStream = getClass().getResourceAsStream("/images/promotional.gif");
+            if (imgStream != null) {
+                bannerIconHolder[0] = new ImageIcon(ImageIO.read(imgStream));
+                imgStream.close();
             }
 
-            JLabel gifLabel = new JLabel(originalIcon) {
-                @Override
-                public Dimension getPreferredSize() {
-                    int parentWidth = getParent().getWidth() - 20;
-                    double aspectRatio = (double)originalIcon.getIconWidth() / originalIcon.getIconHeight();
-                    int height = (int)(parentWidth / aspectRatio);
-                    return new Dimension(parentWidth, height);
+            // 2. Try filesystem path (works in development)
+            if (bannerIconHolder[0] == null) {
+                File imgFile = new File("src/images/promotional.gif");
+                if (imgFile.exists()) {
+                    bannerIconHolder[0] = new ImageIcon(ImageIO.read(imgFile));
                 }
-            };
-            gifLabel.setHorizontalAlignment(SwingConstants.CENTER);
+            }
 
-            releasePanel.addComponentListener(new ComponentAdapter() {
-                @Override
-                public void componentResized(ComponentEvent e) {
-                    gifLabel.revalidate();
-                    releasePanel.revalidate();
+            // 3. Try alternative locations
+            if (bannerIconHolder[0] == null) {
+                String[] altPaths = {
+                    "resources/images/promotional.gif",
+                    "images/promotional.gif",
+                    "promotional.gif"
+                };
+
+                for (String path : altPaths) {
+                    File altFile = new File(path);
+                    if (altFile.exists()) {
+                        bannerIconHolder[0] = new ImageIcon(ImageIO.read(altFile));
+                        break;
+                    }
                 }
-            });
+            }
 
-            gifLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-            gifLabel.addMouseListener(new MouseAdapter() {
+            if (bannerIconHolder[0] != null) {
+                JLabel bannerLabel = new JLabel() {
+                    @Override
+                    public Dimension getPreferredSize() {
+                        int width = getParent() != null ? getParent().getWidth() : 1200;
+                        return new Dimension(width, 180);
+                    }
+                };
+                bannerLabel.setHorizontalAlignment(SwingConstants.CENTER);
+
+                // Initial scaling
+                int initWidth = 1200;
+                double aspectRatio = (double)bannerIconHolder[0].getIconWidth()/bannerIconHolder[0].getIconHeight();
+                int initHeight = (int)(initWidth/aspectRatio);
+                Image scaled = bannerIconHolder[0].getImage().getScaledInstance(
+                    initWidth,
+                    Math.min(initHeight, 250),
+                    Image.SCALE_SMOOTH
+                );
+                bannerLabel.setIcon(new ImageIcon(scaled));
+
+                // Dynamic resizing
+                bannerPanel.addComponentListener(new ComponentAdapter() {
+                    @Override
+                    public void componentResized(ComponentEvent e) {
+                        int width = bannerPanel.getWidth();
+                        if (bannerIconHolder[0] != null) {
+                            double ratio = (double)bannerIconHolder[0].getIconWidth()/bannerIconHolder[0].getIconHeight();
+                            int height = (int)(width/ratio);
+                            Image newScaled = bannerIconHolder[0].getImage().getScaledInstance(
+                                width,
+                                Math.min(height, 250),
+                                Image.SCALE_SMOOTH
+                            );
+                            bannerLabel.setIcon(new ImageIcon(newScaled));
+                        }
+
+                    }
+                });
+
+                bannerLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+                bannerLabel.addMouseListener(new MouseAdapter() {
+                    @Override
+                    public void mouseClicked(MouseEvent e) {
+                        showCategory("Albums");
+                    }
+                });
+
+                bannerPanel.add(bannerLabel, BorderLayout.CENTER);
+            } else {
+                throw new FileNotFoundException("Banner image not found in any location");
+            }
+        } catch (Exception e) {
+            System.err.println("Banner error: " + e.getMessage());
+
+            // Fallback UI
+            JPanel fallbackPanel = new JPanel(new BorderLayout());
+            fallbackPanel.setBackground(new Color(50, 50, 70));
+            fallbackPanel.setBorder(BorderFactory.createLineBorder(ThemeColors.PRIMARY, 2));
+
+            JLabel fallbackLabel = new JLabel("HOT DEALS - CLICK HERE", SwingConstants.CENTER);
+            fallbackLabel.setFont(new Font("Arial", Font.BOLD, 22));
+            fallbackLabel.setForeground(Color.WHITE);
+            fallbackLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+            fallbackLabel.addMouseListener(new MouseAdapter() {
                 @Override
                 public void mouseClicked(MouseEvent e) {
                     showCategory("Albums");
                 }
             });
 
-            releasePanel.add(gifLabel, BorderLayout.CENTER);
-        } catch (Exception e) {
-            System.err.println("Error loading promotional banner: " + e.getMessage());
-            JLabel placeholderLabel = new JLabel("HAMTEO Special Offers", SwingConstants.CENTER);
-            placeholderLabel.setFont(new Font("Arial", Font.BOLD, 24));
-            placeholderLabel.setForeground(ThemeColors.PRIMARY);
-            releasePanel.add(placeholderLabel, BorderLayout.CENTER);
+            bannerPanel.add(fallbackPanel, BorderLayout.CENTER);
+            fallbackPanel.add(fallbackLabel, BorderLayout.CENTER);
         }
 
-        homePanel.add(releasePanel, BorderLayout.NORTH);
+        homePanel.add(bannerPanel, BorderLayout.NORTH);
 
-        // Search and filter panel
+        // ========== SEARCH PANEL ==========
         JPanel searchPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 10));
         searchPanel.setBackground(ThemeColors.BACKGROUND);
-        
+
         searchField = new JTextField(20);
         searchField.setFont(new Font("Arial", Font.PLAIN, 14));
         searchField.setBackground(ThemeColors.CARD_BG);
@@ -300,24 +358,24 @@ public class CustomerFrame extends JFrame {
             BorderFactory.createLineBorder(ThemeColors.SECONDARY, 1),
             BorderFactory.createEmptyBorder(8, 8, 8, 8)
         ));
-        
+
         filterBox = new JComboBox<>(new String[]{"All", "Albums", "Lightsticks", "Goods", "Photocards"});
         filterBox.setFont(new Font("Arial", Font.PLAIN, 14));
         filterBox.setBackground(ThemeColors.CARD_BG);
         filterBox.setForeground(ThemeColors.TEXT);
-        
+
         JButton searchButton = createStyledButton("Search", ThemeColors.PRIMARY);
         searchButton.addActionListener(e -> filterProducts());
-        
+
         searchPanel.add(new JLabel("Search:"));
         searchPanel.add(searchField);
         searchPanel.add(new JLabel("Filter:"));
         searchPanel.add(filterBox);
         searchPanel.add(searchButton);
-        
+
         homePanel.add(searchPanel, BorderLayout.CENTER);
 
-        // K-pop Group Categories
+        // ========== GROUP CATEGORIES ==========
         JPanel categoriesPanel = new JPanel(new GridLayout(2, 3, 20, 20));
         categoriesPanel.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
         categoriesPanel.setBackground(ThemeColors.BACKGROUND);
