@@ -231,29 +231,25 @@ public class CustomerFrame extends JFrame {
         JPanel bannerPanel = new JPanel(new BorderLayout());
         bannerPanel.setBackground(ThemeColors.CARD_BG);
         bannerPanel.setBorder(BorderFactory.createEmptyBorder(5, 0, 5, 0));
-        bannerPanel.setPreferredSize(new Dimension(1200, 180)); // Default size
+        bannerPanel.setPreferredSize(new Dimension(1920, 180)); // Default size
 
-        // Load banner image with multiple fallback options
+        // Load banner image with animation support
         try {
-            final ImageIcon[] bannerIconHolder = new ImageIcon[1];
+            URL gifURL = null;
 
             // 1. Try loading from resources (works in JAR)
-            InputStream imgStream = getClass().getResourceAsStream("/images/promotional.gif");
-            if (imgStream != null) {
-                bannerIconHolder[0] = new ImageIcon(ImageIO.read(imgStream));
-                imgStream.close();
-            }
+            gifURL = getClass().getResource("/images/promotional.gif");
 
             // 2. Try filesystem path (works in development)
-            if (bannerIconHolder[0] == null) {
+            if (gifURL == null) {
                 File imgFile = new File("src/images/promotional.gif");
                 if (imgFile.exists()) {
-                    bannerIconHolder[0] = new ImageIcon(ImageIO.read(imgFile));
+                    gifURL = imgFile.toURI().toURL();
                 }
             }
 
             // 3. Try alternative locations
-            if (bannerIconHolder[0] == null) {
+            if (gifURL == null) {
                 String[] altPaths = {
                     "resources/images/promotional.gif",
                     "images/promotional.gif",
@@ -263,66 +259,56 @@ public class CustomerFrame extends JFrame {
                 for (String path : altPaths) {
                     File altFile = new File(path);
                     if (altFile.exists()) {
-                        bannerIconHolder[0] = new ImageIcon(ImageIO.read(altFile));
+                        gifURL = altFile.toURI().toURL();
                         break;
                     }
                 }
             }
 
-            if (bannerIconHolder[0] != null) {
-                JLabel bannerLabel = new JLabel() {
+            if (gifURL != null) {
+                // Create an ImageIcon that preserves original size
+                final ImageIcon originalIcon = new ImageIcon(gifURL);
+
+                // Create a custom panel that draws the image without scaling
+                JPanel imagePanel = new JPanel() {
+                    @Override
+                    protected void paintComponent(Graphics g) {
+                        super.paintComponent(g);
+                        // Draw the icon at its original size, centered in the panel
+                        originalIcon.paintIcon(this, g, 
+                            (this.getWidth() - originalIcon.getIconWidth()) / 2, 
+                            (this.getHeight() - originalIcon.getIconHeight()) / 2);
+                    }
+
                     @Override
                     public Dimension getPreferredSize() {
-                        int width = getParent() != null ? getParent().getWidth() : 1200;
-                        return new Dimension(width, 180);
+                        // Return the original image dimensions
+                        return new Dimension(originalIcon.getIconWidth(), originalIcon.getIconHeight());
                     }
                 };
-                bannerLabel.setHorizontalAlignment(SwingConstants.CENTER);
 
-                // Initial scaling
-                int initWidth = 1200;
-                double aspectRatio = (double)bannerIconHolder[0].getIconWidth()/bannerIconHolder[0].getIconHeight();
-                int initHeight = (int)(initWidth/aspectRatio);
-                Image scaled = bannerIconHolder[0].getImage().getScaledInstance(
-                    initWidth,
-                    Math.min(initHeight, 250),
-                    Image.SCALE_SMOOTH
-                );
-                bannerLabel.setIcon(new ImageIcon(scaled));
-
-                // Dynamic resizing
-                bannerPanel.addComponentListener(new ComponentAdapter() {
-                    @Override
-                    public void componentResized(ComponentEvent e) {
-                        int width = bannerPanel.getWidth();
-                        if (bannerIconHolder[0] != null) {
-                            double ratio = (double)bannerIconHolder[0].getIconWidth()/bannerIconHolder[0].getIconHeight();
-                            int height = (int)(width/ratio);
-                            Image newScaled = bannerIconHolder[0].getImage().getScaledInstance(
-                                width,
-                                Math.min(height, 250),
-                                Image.SCALE_SMOOTH
-                            );
-                            bannerLabel.setIcon(new ImageIcon(newScaled));
-                        }
-
-                    }
-                });
-
-                bannerLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-                bannerLabel.addMouseListener(new MouseAdapter() {
+                // Set background and make clickable
+                imagePanel.setBackground(ThemeColors.CARD_BG);
+                imagePanel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+                imagePanel.addMouseListener(new MouseAdapter() {
                     @Override
                     public void mouseClicked(MouseEvent e) {
                         showCategory("Albums");
                     }
                 });
 
-                bannerPanel.add(bannerLabel, BorderLayout.CENTER);
+                // Create a wrapper panel with FlowLayout to center the image panel
+                JPanel wrapperPanel = new JPanel(new FlowLayout(FlowLayout.CENTER));
+                wrapperPanel.setBackground(ThemeColors.CARD_BG);
+                wrapperPanel.add(imagePanel);
+
+                bannerPanel.add(wrapperPanel, BorderLayout.CENTER);
             } else {
                 throw new FileNotFoundException("Banner image not found in any location");
             }
         } catch (Exception e) {
             System.err.println("Banner error: " + e.getMessage());
+            e.printStackTrace();
 
             // Fallback UI
             JPanel fallbackPanel = new JPanel(new BorderLayout());
