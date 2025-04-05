@@ -3,8 +3,9 @@ package OnlineShop;
 import javax.swing.*;
 import javax.swing.table.DefaultTableModel;
 import java.awt.*;
+import java.awt.event.*;
 import java.sql.*;
-import com.formdev.flatlaf.FlatIntelliJLaf;
+import com.formdev.flatlaf.FlatDarkLaf;
 
 public class AdminFrame extends JFrame {
     private JPanel mainPanel;
@@ -13,194 +14,94 @@ public class AdminFrame extends JFrame {
     private DefaultTableModel userTableModel, productTableModel, inventoryTableModel, salesTableModel, supplierTableModel;
 
     public AdminFrame() {
-        setTitle("Admin Panel");
-        setSize(1000, 600);
+        setTitle("Admin Panel - K-Pop Merch Store");
         setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
         setLayout(new BorderLayout());
+        
+        // Set to full screen or maximized
+        GraphicsEnvironment env = GraphicsEnvironment.getLocalGraphicsEnvironment();
+        GraphicsDevice device = env.getDefaultScreenDevice();
+        
+        if (device.isFullScreenSupported()) {
+            setUndecorated(true);
+            device.setFullScreenWindow(this);
+        } else {
+            setExtendedState(JFrame.MAXIMIZED_BOTH);
+        }
 
         // CardLayout for switching between views
         cardLayout = new CardLayout();
         mainPanel = new JPanel(cardLayout);
+        mainPanel.setBackground(ThemeColors.BACKGROUND);
 
-        // Dashboard Panel (Default View)
+        // Create all panels
         JPanel dashboardPanel = createDashboardPanel();
-        mainPanel.add(dashboardPanel, "Dashboard");
-
-        // Users Panel
         JPanel usersPanel = createUsersPanel();
-        mainPanel.add(usersPanel, "Users");
-
-        // Products Panel
         JPanel productsPanel = createProductsPanel();
-        mainPanel.add(productsPanel, "Products");
-
-        // Inventory Panel
         JPanel inventoryPanel = createInventoryPanel();
-        mainPanel.add(inventoryPanel, "Inventory");
-
-        // Sales Panel
         JPanel salesPanel = createSalesPanel();
-        mainPanel.add(salesPanel, "Sales");
-
-        // Suppliers Panel
         JPanel suppliersPanel = createSuppliersPanel();
+
+        // Add panels to mainPanel
+        mainPanel.add(dashboardPanel, "Dashboard");
+        mainPanel.add(usersPanel, "Users");
+        mainPanel.add(productsPanel, "Products");
+        mainPanel.add(inventoryPanel, "Inventory");
+        mainPanel.add(salesPanel, "Sales");
         mainPanel.add(suppliersPanel, "Suppliers");
 
-        // Add mainPanel to the frame
         add(mainPanel, BorderLayout.CENTER);
+        add(createNavigationBar(), BorderLayout.WEST);
 
-        // Navigation Panel
-        JPanel navPanel = createNavigationPanel();
-        add(navPanel, BorderLayout.WEST);
-
+        setLocationRelativeTo(null);
         setVisible(true);
     }
 
-    private JPanel createDashboardPanel() {
-        JPanel dashboardPanel = new JPanel(new GridLayout(3, 2, 10, 10));
-        dashboardPanel.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
-        dashboardPanel.setBackground(new Color(173, 216, 230)); // Pastel Blue
+    private JPanel createNavigationBar() {
+        JPanel navBar = new JPanel(new BorderLayout());
+        navBar.setBackground(ThemeColors.BACKGROUND);
+        navBar.setBorder(BorderFactory.createEmptyBorder(10, 20, 10, 20));
+        navBar.setPreferredSize(new Dimension(200, getHeight()));
 
-        // Key Metrics Cards
-        JPanel totalProductsCard = createMetricCard("Total Products", getTotalProducts());
-        JPanel totalOrdersCard = createMetricCard("Total Orders", getTotalOrders());
-        JPanel lowStockCard = createMetricCard("Low Stock Items", getLowStockItems());
-        JPanel totalCustomersCard = createMetricCard("Total Customers", getTotalCustomers());
-        JPanel totalRevenueCard = createMetricCard("Total Revenue", getTotalRevenue());
-        JPanel pendingOrdersCard = createMetricCard("Pending Orders", getPendingOrders());
+        // Logo
+        JLabel logo = new JLabel("Admin Panel", SwingConstants.CENTER);
+        logo.setFont(new Font("Malgun Gothic", Font.BOLD, 20));
+        logo.setForeground(ThemeColors.PRIMARY);
+        navBar.add(logo, BorderLayout.NORTH);
 
-        dashboardPanel.add(totalProductsCard);
-        dashboardPanel.add(totalOrdersCard);
-        dashboardPanel.add(lowStockCard);
-        dashboardPanel.add(totalCustomersCard);
-        dashboardPanel.add(totalRevenueCard);
-        dashboardPanel.add(pendingOrdersCard);
-
-        return dashboardPanel;
-    }
-
-    private JPanel createMetricCard(String title, String value) {
-        JPanel card = new JPanel(new BorderLayout());
-        card.setBackground(new Color(255, 182, 193)); // Pastel Pink
-        card.setBorder(BorderFactory.createLineBorder(Color.GRAY, 1));
-
-        JLabel titleLabel = new JLabel(title, SwingConstants.CENTER);
-        titleLabel.setFont(new Font("Arial", Font.BOLD, 16));
-        titleLabel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
-
-        JLabel valueLabel = new JLabel(value, SwingConstants.CENTER);
-        valueLabel.setFont(new Font("Arial", Font.PLAIN, 24));
-        valueLabel.setBorder(BorderFactory.createEmptyBorder(10, 10, 20, 10));
-
-        card.add(titleLabel, BorderLayout.NORTH);
-        card.add(valueLabel, BorderLayout.CENTER);
-
-        return card;
-    }
-
-    private JPanel createUsersPanel() {
-        JPanel usersPanel = new JPanel(new BorderLayout());
-        usersPanel.setBackground(new Color(173, 216, 230)); // Pastel Blue
-
-        userTableModel = new DefaultTableModel(new String[]{"ID", "Name", "Email", "Role"}, 0);
-        userTable = new JTable(userTableModel);
-        loadUsers();
-
-        JScrollPane scrollPane = new JScrollPane(userTable);
-        usersPanel.add(scrollPane, BorderLayout.CENTER);
-
-        return usersPanel;
-    }
-
-    private JPanel createProductsPanel() {
-        JPanel productsPanel = new JPanel(new BorderLayout());
-        productsPanel.setBackground(new Color(173, 216, 230)); // Pastel Blue
-
-        productTableModel = new DefaultTableModel(new String[]{"ID", "Name", "Price", "Stock", "Category"}, 0);
-        productTable = new JTable(productTableModel);
-        loadProducts();
-
-        JScrollPane scrollPane = new JScrollPane(productTable);
-        productsPanel.add(scrollPane, BorderLayout.CENTER);
-
-        return productsPanel;
-    }
-
-    private JPanel createInventoryPanel() {
-        JPanel inventoryPanel = new JPanel(new BorderLayout());
-        inventoryPanel.setBackground(new Color(173, 216, 230)); // Pastel Blue
-
-        inventoryTableModel = new DefaultTableModel(new String[]{"ID", "Name", "Stock"}, 0);
-        inventoryTable = new JTable(inventoryTableModel);
-        loadInventory();
-
-        JScrollPane scrollPane = new JScrollPane(inventoryTable);
-        inventoryPanel.add(scrollPane, BorderLayout.CENTER);
-
-        return inventoryPanel;
-    }
-
-    private JPanel createSalesPanel() {
-        JPanel salesPanel = new JPanel(new BorderLayout());
-        salesPanel.setBackground(new Color(173, 216, 230)); // Pastel Blue
-
-        salesTableModel = new DefaultTableModel(new String[]{"Order ID", "Customer ID", "Product", "Quantity", "Total Price", "Date"}, 0);
-        salesTable = new JTable(salesTableModel);
-        loadSales();
-
-        JScrollPane scrollPane = new JScrollPane(salesTable);
-        salesPanel.add(scrollPane, BorderLayout.CENTER);
-
-        return salesPanel;
-    }
-
-    private JPanel createSuppliersPanel() {
-        JPanel suppliersPanel = new JPanel(new BorderLayout());
-        suppliersPanel.setBackground(new Color(173, 216, 230)); // Pastel Blue
-
-        supplierTableModel = new DefaultTableModel(new String[]{"ID", "Name", "Contact"}, 0);
-        supplierTable = new JTable(supplierTableModel);
-        loadSuppliers();
-
-        JScrollPane scrollPane = new JScrollPane(supplierTable);
-        suppliersPanel.add(scrollPane, BorderLayout.CENTER);
-
-        return suppliersPanel;
-    }
-
-    private JPanel createNavigationPanel() {
-        JPanel navPanel = new JPanel(new GridLayout(8, 1, 10, 10));
-        navPanel.setBorder(BorderFactory.createEmptyBorder(20, 10, 20, 10));
-        navPanel.setBackground(new Color(255, 223, 186)); // Pastel Yellow
+        // Navigation buttons
+        JPanel navButtons = new JPanel(new GridLayout(7, 1, 10, 10));
+        navButtons.setOpaque(false);
+        navButtons.setBorder(BorderFactory.createEmptyBorder(20, 0, 20, 0));
 
         JButton dashboardButton = createNavButton("Dashboard");
         dashboardButton.addActionListener(e -> cardLayout.show(mainPanel, "Dashboard"));
 
-        JButton usersButton = createNavButton("Manage Users");
+        JButton usersButton = createNavButton("Users");
         usersButton.addActionListener(e -> {
             loadUsers();
             cardLayout.show(mainPanel, "Users");
         });
 
-        JButton productsButton = createNavButton("Manage Products");
+        JButton productsButton = createNavButton("Products");
         productsButton.addActionListener(e -> {
             loadProducts();
             cardLayout.show(mainPanel, "Products");
         });
 
-        JButton inventoryButton = createNavButton("Manage Inventory");
+        JButton inventoryButton = createNavButton("Inventory");
         inventoryButton.addActionListener(e -> {
             loadInventory();
             cardLayout.show(mainPanel, "Inventory");
         });
 
-        JButton salesButton = createNavButton("Sales Reports");
+        JButton salesButton = createNavButton("Sales");
         salesButton.addActionListener(e -> {
             loadSales();
             cardLayout.show(mainPanel, "Sales");
         });
 
-        JButton suppliersButton = createNavButton("Manage Suppliers");
+        JButton suppliersButton = createNavButton("Suppliers");
         suppliersButton.addActionListener(e -> {
             loadSuppliers();
             cardLayout.show(mainPanel, "Suppliers");
@@ -209,24 +110,160 @@ public class AdminFrame extends JFrame {
         JButton logoutButton = createNavButton("Logout");
         logoutButton.addActionListener(e -> logout());
 
-        navPanel.add(dashboardButton);
-        navPanel.add(usersButton);
-        navPanel.add(productsButton);
-        navPanel.add(inventoryButton);
-        navPanel.add(salesButton);
-        navPanel.add(suppliersButton);
-        navPanel.add(logoutButton);
+        navButtons.add(dashboardButton);
+        navButtons.add(usersButton);
+        navButtons.add(productsButton);
+        navButtons.add(inventoryButton);
+        navButtons.add(salesButton);
+        navButtons.add(suppliersButton);
+        navButtons.add(logoutButton);
 
-        return navPanel;
+        navBar.add(navButtons, BorderLayout.CENTER);
+        return navBar;
     }
 
     private JButton createNavButton(String text) {
         JButton button = new JButton(text);
-        button.setBackground(new Color(255, 182, 193)); // Pastel Pink
-        button.setForeground(Color.WHITE);
         button.setFont(new Font("Arial", Font.BOLD, 14));
+        button.setForeground(ThemeColors.TEXT);
+        button.setBackground(ThemeColors.CARD_BG);
+        button.setBorder(BorderFactory.createEmptyBorder(10, 20, 10, 20));
+        button.setHorizontalAlignment(SwingConstants.LEFT);
         button.setFocusPainted(false);
+        button.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseEntered(MouseEvent e) {
+                button.setBackground(ThemeColors.PRIMARY);
+                button.setForeground(Color.WHITE);
+            }
+            @Override
+            public void mouseExited(MouseEvent e) {
+                button.setBackground(ThemeColors.CARD_BG);
+                button.setForeground(ThemeColors.TEXT);
+            }
+        });
         return button;
+    }
+
+    private JPanel createDashboardPanel() {
+        JPanel dashboardPanel = new JPanel(new BorderLayout());
+        dashboardPanel.setBackground(ThemeColors.BACKGROUND);
+
+        // Title
+        JLabel titleLabel = new JLabel("Admin Dashboard", SwingConstants.CENTER);
+        titleLabel.setFont(new Font("Arial", Font.BOLD, 24));
+        titleLabel.setForeground(ThemeColors.PRIMARY);
+        titleLabel.setBorder(BorderFactory.createEmptyBorder(20, 0, 20, 0));
+        dashboardPanel.add(titleLabel, BorderLayout.NORTH);
+
+        // Metrics grid
+        JPanel metricsPanel = new JPanel(new GridLayout(2, 3, 20, 20));
+        metricsPanel.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
+        metricsPanel.setBackground(ThemeColors.BACKGROUND);
+
+        // Add metric cards
+        metricsPanel.add(createMetricCard("Total Products", getTotalProducts()));
+        metricsPanel.add(createMetricCard("Total Orders", getTotalOrders()));
+        metricsPanel.add(createMetricCard("Low Stock Items", getLowStockItems()));
+        metricsPanel.add(createMetricCard("Total Customers", getTotalCustomers()));
+        metricsPanel.add(createMetricCard("Total Revenue", getTotalRevenue()));
+        metricsPanel.add(createMetricCard("Pending Orders", getPendingOrders()));
+
+        dashboardPanel.add(metricsPanel, BorderLayout.CENTER);
+        return dashboardPanel;
+    }
+
+    private JPanel createMetricCard(String title, String value) {
+        JPanel card = new JPanel(new BorderLayout());
+        card.setBackground(ThemeColors.CARD_BG);
+        card.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(ThemeColors.SECONDARY, 1),
+            BorderFactory.createEmptyBorder(20, 20, 20, 20)
+        ));
+
+        JLabel titleLabel = new JLabel(title, SwingConstants.CENTER);
+        titleLabel.setFont(new Font("Arial", Font.BOLD, 16));
+        titleLabel.setForeground(ThemeColors.TEXT);
+
+        JLabel valueLabel = new JLabel(value, SwingConstants.CENTER);
+        valueLabel.setFont(new Font("Arial", Font.BOLD, 24));
+        valueLabel.setForeground(ThemeColors.PRIMARY);
+
+        card.add(titleLabel, BorderLayout.NORTH);
+        card.add(valueLabel, BorderLayout.CENTER);
+        return card;
+    }
+
+    private JPanel createUsersPanel() {
+        JPanel panel = createTablePanel("User Management");
+        userTableModel = new DefaultTableModel(new String[]{"ID", "Name", "Email", "Role"}, 0);
+        userTable = new JTable(userTableModel);
+        styleTable(userTable);
+        panel.add(new JScrollPane(userTable), BorderLayout.CENTER);
+        return panel;
+    }
+
+    private JPanel createProductsPanel() {
+        JPanel panel = createTablePanel("Product Management");
+        productTableModel = new DefaultTableModel(new String[]{"ID", "Name", "Price", "Stock", "Category"}, 0);
+        productTable = new JTable(productTableModel);
+        styleTable(productTable);
+        panel.add(new JScrollPane(productTable), BorderLayout.CENTER);
+        return panel;
+    }
+
+    private JPanel createInventoryPanel() {
+        JPanel panel = createTablePanel("Inventory Management");
+        inventoryTableModel = new DefaultTableModel(new String[]{"ID", "Name", "Stock"}, 0);
+        inventoryTable = new JTable(inventoryTableModel);
+        styleTable(inventoryTable);
+        panel.add(new JScrollPane(inventoryTable), BorderLayout.CENTER);
+        return panel;
+    }
+
+    private JPanel createSalesPanel() {
+        JPanel panel = createTablePanel("Sales Reports");
+        salesTableModel = new DefaultTableModel(new String[]{"Order ID", "Customer ID", "Product", "Quantity", "Total Price", "Date"}, 0);
+        salesTable = new JTable(salesTableModel);
+        styleTable(salesTable);
+        panel.add(new JScrollPane(salesTable), BorderLayout.CENTER);
+        return panel;
+    }
+
+    private JPanel createSuppliersPanel() {
+        JPanel panel = createTablePanel("Supplier Management");
+        supplierTableModel = new DefaultTableModel(new String[]{"ID", "Name", "Contact"}, 0);
+        supplierTable = new JTable(supplierTableModel);
+        styleTable(supplierTable);
+        panel.add(new JScrollPane(supplierTable), BorderLayout.CENTER);
+        return panel;
+    }
+
+    private JPanel createTablePanel(String title) {
+        JPanel panel = new JPanel(new BorderLayout());
+        panel.setBackground(ThemeColors.BACKGROUND);
+
+        // Title
+        JLabel titleLabel = new JLabel(title, SwingConstants.CENTER);
+        titleLabel.setFont(new Font("Arial", Font.BOLD, 24));
+        titleLabel.setForeground(ThemeColors.PRIMARY);
+        titleLabel.setBorder(BorderFactory.createEmptyBorder(20, 0, 20, 0));
+        panel.add(titleLabel, BorderLayout.NORTH);
+
+        return panel;
+    }
+
+    private void styleTable(JTable table) {
+        table.setBackground(ThemeColors.CARD_BG);
+        table.setForeground(ThemeColors.TEXT);
+        table.setFont(new Font("Arial", Font.PLAIN, 14));
+        table.setGridColor(ThemeColors.BACKGROUND);
+        table.setSelectionBackground(ThemeColors.PRIMARY);
+        table.setSelectionForeground(Color.WHITE);
+        table.setRowHeight(30);
+        table.getTableHeader().setFont(new Font("Arial", Font.BOLD, 14));
+        table.getTableHeader().setBackground(ThemeColors.SECONDARY);
+        table.getTableHeader().setForeground(Color.WHITE);
     }
 
     private void loadUsers() {
@@ -389,7 +426,10 @@ public class AdminFrame extends JFrame {
     }
 
     private void logout() {
-        int confirm = JOptionPane.showConfirmDialog(this, "Are you sure you want to log out?", "Logout", JOptionPane.YES_NO_OPTION);
+        int confirm = JOptionPane.showConfirmDialog(this, 
+            "Are you sure you want to log out?", 
+            "Logout", 
+            JOptionPane.YES_NO_OPTION);
         if (confirm == JOptionPane.YES_OPTION) {
             new LoginFrame();
             dispose();
@@ -398,10 +438,13 @@ public class AdminFrame extends JFrame {
 
     public static void main(String[] args) {
         try {
-            UIManager.setLookAndFeel(new FlatIntelliJLaf());
+            UIManager.setLookAndFeel(new FlatDarkLaf());
         } catch (Exception ex) {
+            System.err.println("Failed to initialize FlatDarkLaf");
             ex.printStackTrace();
         }
-        new AdminFrame();
+        SwingUtilities.invokeLater(() -> {
+            new AdminFrame();
+        });
     }
 }

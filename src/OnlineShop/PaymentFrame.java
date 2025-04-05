@@ -9,13 +9,16 @@ import com.formdev.flatlaf.FlatDarkLaf;
 public class PaymentFrame extends JFrame {
     private int customerId;
     private JTextField cardNumberField, cvvField, expiryField;
+    private JTextField accountNameField, accountNumberField;
+    private JPasswordField accountPasswordField;
     private JButton payButton, cancelButton;
     private JComboBox<String> paymentMethodBox;
+    private JPanel fieldsPanel;
 
     public PaymentFrame(int customerId) {
         this.customerId = customerId;
         setTitle("HAMTEO - Payment");
-        setSize(600, 400);
+        setSize(600, 500); // Increased height to accommodate all fields
         setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
         setLayout(new GridBagLayout());
         GridBagConstraints gbc = new GridBagConstraints();
@@ -36,30 +39,20 @@ public class PaymentFrame extends JFrame {
         gbc.gridy = 1; gbc.gridx = 0;
         add(createFormLabel("Payment Method:"), gbc);
         paymentMethodBox = new JComboBox<>(new String[]{"Credit Card", "PayPal", "GCash", "Maya"});
+        paymentMethodBox.addActionListener(e -> updateFieldsVisibility());
         styleComboBox(paymentMethodBox);
         gbc.gridx = 1;
         add(paymentMethodBox, gbc);
 
-        // Card number
-        gbc.gridy = 2; gbc.gridx = 0;
-        add(createFormLabel("Card Number:"), gbc);
-        cardNumberField = createFormTextField();
-        gbc.gridx = 1;
-        add(cardNumberField, gbc);
+        // Fields panel - will contain all possible fields
+        fieldsPanel = new JPanel(new GridLayout(0, 2, 10, 10));
+        fieldsPanel.setBackground(ThemeColors.BACKGROUND);
+        gbc.gridy = 2; gbc.gridx = 0; gbc.gridwidth = 2;
+        add(fieldsPanel, gbc);
 
-        // CVV
-        gbc.gridy = 3; gbc.gridx = 0;
-        add(createFormLabel("CVV:"), gbc);
-        cvvField = createFormTextField();
-        gbc.gridx = 1;
-        add(cvvField, gbc);
-
-        // Expiry
-        gbc.gridy = 4; gbc.gridx = 0;
-        add(createFormLabel("Expiry Date (MM/YY):"), gbc);
-        expiryField = createFormTextField();
-        gbc.gridx = 1;
-        add(expiryField, gbc);
+        // Create all possible fields (hidden by default)
+        createCardFields();
+        createDigitalWalletFields();
 
         // Buttons
         JPanel buttonPanel = new JPanel(new GridLayout(1, 2, 20, 0));
@@ -74,11 +67,82 @@ public class PaymentFrame extends JFrame {
         buttonPanel.add(payButton);
         buttonPanel.add(cancelButton);
         
-        gbc.gridy = 5; gbc.gridx = 0; gbc.gridwidth = 2;
+        gbc.gridy = 3; gbc.gridx = 0; gbc.gridwidth = 2;
         add(buttonPanel, gbc);
+
+        // Initialize fields visibility
+        updateFieldsVisibility();
 
         setLocationRelativeTo(null);
         setVisible(true);
+    }
+
+    private void createCardFields() {
+        // Card number
+        fieldsPanel.add(createFormLabel("Card Number:"));
+        cardNumberField = createFormTextField();
+        fieldsPanel.add(cardNumberField);
+
+        // CVV
+        fieldsPanel.add(createFormLabel("CVV:"));
+        cvvField = createFormTextField();
+        fieldsPanel.add(cvvField);
+
+        // Expiry
+        fieldsPanel.add(createFormLabel("Expiry Date (MM/YY):"));
+        expiryField = createFormTextField();
+        fieldsPanel.add(expiryField);
+    }
+
+    private void createDigitalWalletFields() {
+        // Account name
+        fieldsPanel.add(createFormLabel("Account Name:"));
+        accountNameField = createFormTextField();
+        fieldsPanel.add(accountNameField);
+
+        // Account number
+        fieldsPanel.add(createFormLabel("Account Number:"));
+        accountNumberField = createFormTextField();
+        fieldsPanel.add(accountNumberField);
+
+        // Password
+        fieldsPanel.add(createFormLabel("Password:"));
+        accountPasswordField = new JPasswordField();
+        accountPasswordField.setFont(new Font("Arial", Font.PLAIN, 14));
+        accountPasswordField.setBackground(ThemeColors.CARD_BG);
+        accountPasswordField.setForeground(ThemeColors.TEXT);
+        accountPasswordField.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(ThemeColors.SECONDARY, 1),
+            BorderFactory.createEmptyBorder(8, 8, 8, 8)
+        ));
+        fieldsPanel.add(accountPasswordField);
+    }
+
+    private void updateFieldsVisibility() {
+        String method = (String) paymentMethodBox.getSelectedItem();
+        
+        // Hide all fields first
+        cardNumberField.setVisible(false);
+        cvvField.setVisible(false);
+        expiryField.setVisible(false);
+        accountNameField.setVisible(false);
+        accountNumberField.setVisible(false);
+        accountPasswordField.setVisible(false);
+        
+        // Show only the relevant fields
+        if (method.equals("Credit Card")) {
+            cardNumberField.setVisible(true);
+            cvvField.setVisible(true);
+            expiryField.setVisible(true);
+        } else { // PayPal, GCash, Maya
+            accountNameField.setVisible(true);
+            accountNumberField.setVisible(true);
+            accountPasswordField.setVisible(true);
+        }
+        
+        // Update the UI
+        revalidate();
+        repaint();
     }
 
     private JLabel createFormLabel(String text) {
@@ -132,30 +196,81 @@ public class PaymentFrame extends JFrame {
 
     private void processPayment() {
         String method = (String) paymentMethodBox.getSelectedItem();
-        String cardNumber = cardNumberField.getText();
-        String cvv = cvvField.getText();
-        String expiry = expiryField.getText();
 
-        if (method.equals("Credit Card") && (cardNumber.isEmpty() || cvv.isEmpty() || expiry.isEmpty())) {
-            JOptionPane.showMessageDialog(this, "Please enter all card details.", "Error", JOptionPane.ERROR_MESSAGE);
-            return;
-        }
+        try (Connection conn = DBConnection.connect()) {
+            conn.setAutoCommit(false); // Start transaction
 
-        try (Connection conn = DBConnection.connect();
-             PreparedStatement stmt = conn.prepareStatement("INSERT INTO payments (customer_id, method, card_number, cvv, expiry) VALUES (?, ?, ?, ?, ?)")) {
-            stmt.setInt(1, customerId);
-            stmt.setString(2, method);
-            stmt.setString(3, cardNumber);
-            stmt.setString(4, cvv);
-            stmt.setString(5, expiry);
-            stmt.executeUpdate();
+            try {
+                // 1. Create the order record
+                int orderId;
+                String insertOrderSQL = "INSERT INTO orders (customer_id, status, order_date) VALUES (?, 'Processing', NOW())";
+                try (PreparedStatement orderStmt = conn.prepareStatement(insertOrderSQL, Statement.RETURN_GENERATED_KEYS)) {
+                    orderStmt.setInt(1, customerId);
+                    orderStmt.executeUpdate();
 
-            JOptionPane.showMessageDialog(this, "Payment Successful!");
-            new CustomerFrame(customerId);
-            dispose();
-        } catch (SQLException ex) {
-            ex.printStackTrace();
-            JOptionPane.showMessageDialog(this, "Error processing payment.", "Error", JOptionPane.ERROR_MESSAGE);
+                    ResultSet rs = orderStmt.getGeneratedKeys();
+                    if (rs.next()) {
+                        orderId = rs.getInt(1);
+                    } else {
+                        throw new SQLException("Failed to create order");
+                    }
+                }
+
+                // 2. Add all cart items to order_items
+                String insertItemSQL = "INSERT INTO order_items (order_id, product_id, quantity, price) " +
+                                     "SELECT ?, product_id, quantity, price FROM cart WHERE customer_id = ?";
+                try (PreparedStatement itemStmt = conn.prepareStatement(insertItemSQL)) {
+                    itemStmt.setInt(1, orderId);
+                    itemStmt.setInt(2, customerId);
+                    itemStmt.executeUpdate();
+                }
+
+                // 3. Clear the cart
+                try (PreparedStatement clearCartStmt = conn.prepareStatement(
+                    "DELETE FROM cart WHERE customer_id = ?")) {
+                    clearCartStmt.setInt(1, customerId);
+                    clearCartStmt.executeUpdate();
+                }
+
+                // 4. Record payment
+                if (method.equals("Credit Card")) {
+                    try (PreparedStatement paymentStmt = conn.prepareStatement(
+                        "INSERT INTO payments (customer_id, order_id, method, card_number, cvv, expiry) " +
+                        "VALUES (?, ?, ?, ?, ?, ?)")) {
+                        paymentStmt.setInt(1, customerId);
+                        paymentStmt.setInt(2, orderId);
+                        paymentStmt.setString(3, method);
+                        paymentStmt.setString(4, cardNumberField.getText().trim());
+                        paymentStmt.setString(5, cvvField.getText().trim());
+                        paymentStmt.setString(6, expiryField.getText().trim());
+                        paymentStmt.executeUpdate();
+                    }
+                } else {
+                    try (PreparedStatement paymentStmt = conn.prepareStatement(
+                        "INSERT INTO payments (customer_id, order_id, method, account_name, account_number) " +
+                        "VALUES (?, ?, ?, ?, ?)")) {
+                        paymentStmt.setInt(1, customerId);
+                        paymentStmt.setInt(2, orderId);
+                        paymentStmt.setString(3, method);
+                        paymentStmt.setString(4, accountNameField.getText().trim());
+                        paymentStmt.setString(5, accountNumberField.getText().trim());
+                        paymentStmt.executeUpdate();
+                    }
+                }
+
+                conn.commit(); // Commit transaction if all succeeds
+                JOptionPane.showMessageDialog(this, "Order placed successfully!");
+                new CustomerFrame(customerId);
+                dispose();
+
+            } catch (SQLException ex) {
+                conn.rollback(); // Rollback if any error occurs
+                throw ex;
+            }
+        } catch (Exception ex) {
+            JOptionPane.showMessageDialog(this, 
+                "Error processing order: " + ex.getMessage(), 
+                "Error", JOptionPane.ERROR_MESSAGE);
         }
     }
 
