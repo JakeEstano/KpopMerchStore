@@ -87,7 +87,11 @@ public class ProductReviewFrame extends JFrame {
     private void loadProducts() {
         try (Connection conn = DBConnection.connect();
              PreparedStatement stmt = conn.prepareStatement(
-                 "SELECT p.name FROM orders o JOIN products p ON o.product_id = p.id WHERE o.customer_id = ?")) {
+                 "SELECT DISTINCT p.name " +
+                 "FROM orders o " +
+                 "JOIN order_items oi ON o.id = oi.order_id " +
+                 "JOIN products p ON oi.product_id = p.id " +
+                 "WHERE o.customer_id = ?")) {
             stmt.setInt(1, customerId);
             ResultSet rs = stmt.executeQuery();
             while (rs.next()) {

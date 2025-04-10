@@ -29,8 +29,6 @@ public class CustomerFrame extends JFrame {
     private JButton shopButton, eventButton, faqButton, noticeButton, aboutButton;
     
     // Cart components
-    private DefaultTableModel cartTableModel;
-    private JTable cartTable;
     private JPanel cartPanel;
     
     // Wishlist components
@@ -47,6 +45,8 @@ public class CustomerFrame extends JFrame {
     private JPanel productGridPanel;
     private JTextField searchField;
     
+    private JPanel cartItemsPanel;
+    private JLabel cartTotalLabel;
 
     public CustomerFrame(int customerId) {
         this.customerId = customerId;
@@ -676,7 +676,9 @@ public class CustomerFrame extends JFrame {
     private JPanel createCartPanel() {
         JPanel panel = new JPanel(new BorderLayout());
         panel.setBackground(ThemeColors.BACKGROUND);
+        panel.setBorder(BorderFactory.createEmptyBorder(10, 20, 10, 20));
 
+        // Back button
         JButton backButton = new JButton("← Back to Home");
         backButton.setFont(new Font("Arial", Font.BOLD, 14));
         backButton.setBackground(ThemeColors.CARD_BG);
@@ -685,57 +687,264 @@ public class CustomerFrame extends JFrame {
         backButton.addActionListener(e -> showCard("Home"));
         panel.add(backButton, BorderLayout.NORTH);
 
-        JLabel title = new JLabel("Your Shopping Cart", SwingConstants.CENTER);
+        // Main cart content panel
+        JPanel cartContentPanel = new JPanel(new BorderLayout());
+        cartContentPanel.setBackground(ThemeColors.BACKGROUND);
+
+        // Title
+        JPanel titlePanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        titlePanel.setBackground(ThemeColors.BACKGROUND);
+        titlePanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 20, 0));
+
+        JLabel title = new JLabel("Your Shopping Cart");
         title.setFont(new Font("Arial", Font.BOLD, 24));
         title.setForeground(ThemeColors.PRIMARY);
-        title.setBorder(BorderFactory.createEmptyBorder(20, 0, 20, 0));
-        panel.add(title, BorderLayout.NORTH);
+        titlePanel.add(title);
 
-        cartTableModel = new DefaultTableModel(new Object[]{"Product", "Price", "Quantity", "Total"}, 0) {
-            @Override
-            public boolean isCellEditable(int row, int column) {
-                return column == 2;
-            }
-        };
-        cartTable = new JTable(cartTableModel);
-        styleTable(cartTable);
-        
-        cartTable.getModel().addTableModelListener(e -> {
-            if (e.getColumn() == 2) {
-                int row = e.getFirstRow();
-                try {
-                    int quantity = Integer.parseInt(cartTableModel.getValueAt(row, 2).toString());
-                    double price = (Double) cartTableModel.getValueAt(row, 1);
-                    cartTableModel.setValueAt(price * quantity, row, 3);
-                } catch (NumberFormatException ex) {
-                    JOptionPane.showMessageDialog(this, "Please enter a valid quantity", "Error", JOptionPane.ERROR_MESSAGE);
-                }
-            }
-        });
+        cartContentPanel.add(titlePanel, BorderLayout.NORTH);
 
-        JScrollPane scrollPane = new JScrollPane(cartTable);
-        panel.add(scrollPane, BorderLayout.CENTER);
+        // Cart items panel
+        cartItemsPanel = new JPanel();
+        cartItemsPanel.setLayout(new BoxLayout(cartItemsPanel, BoxLayout.Y_AXIS));
+        cartItemsPanel.setBackground(ThemeColors.BACKGROUND);
+        cartItemsPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
 
-        JPanel checkoutPanel = new JPanel(new BorderLayout());
-        checkoutPanel.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
-        checkoutPanel.setBackground(ThemeColors.CARD_BG);
-        
-        JLabel totalLabel = new JLabel("Total: $0.00", SwingConstants.RIGHT);
-        totalLabel.setFont(new Font("Arial", Font.BOLD, 18));
+        JScrollPane scrollPane = new JScrollPane(cartItemsPanel);
+        scrollPane.setBorder(BorderFactory.createEmptyBorder());
+        scrollPane.getViewport().setBackground(ThemeColors.BACKGROUND);
+        scrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+
+        cartContentPanel.add(scrollPane, BorderLayout.CENTER);
+
+        // Summary panel (simplified)
+        JPanel summaryPanel = new JPanel();
+        summaryPanel.setLayout(new BoxLayout(summaryPanel, BoxLayout.Y_AXIS));
+        summaryPanel.setBackground(ThemeColors.CARD_BG);
+        summaryPanel.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
+
+        // Total amount
+        JPanel totalPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        totalPanel.setBackground(ThemeColors.CARD_BG);
+
+        JLabel totalLabel = new JLabel("Total Amount:");
+        totalLabel.setFont(new Font("Arial", Font.BOLD, 16));
         totalLabel.setForeground(ThemeColors.TEXT);
-        checkoutPanel.add(totalLabel, BorderLayout.CENTER);
-        
-        JButton checkoutButton = new JButton("CHECKOUT");
+
+        cartTotalLabel = new JLabel("₱0.00");
+        cartTotalLabel.setFont(new Font("Arial", Font.BOLD, 18));
+        cartTotalLabel.setForeground(ThemeColors.PRIMARY);
+
+        totalPanel.add(totalLabel);
+        totalPanel.add(cartTotalLabel);
+        summaryPanel.add(totalPanel);
+
+        // Checkout button
+        summaryPanel.add(Box.createRigidArea(new Dimension(0, 20)));
+
+        JButton checkoutButton = new JButton("PROCEED TO CHECKOUT");
         checkoutButton.setFont(new Font("Arial", Font.BOLD, 16));
         checkoutButton.setBackground(ThemeColors.PRIMARY);
         checkoutButton.setForeground(Color.WHITE);
-        checkoutButton.setBorder(BorderFactory.createEmptyBorder(15, 30, 15, 30));
+        checkoutButton.setAlignmentX(Component.CENTER_ALIGNMENT);
+        checkoutButton.setMaximumSize(new Dimension(Integer.MAX_VALUE, checkoutButton.getPreferredSize().height));
+        checkoutButton.setBorder(BorderFactory.createEmptyBorder(10, 30, 10, 30));
         checkoutButton.addActionListener(e -> checkout());
-        checkoutPanel.add(checkoutButton, BorderLayout.EAST);
-        
-        panel.add(checkoutPanel, BorderLayout.SOUTH);
+        summaryPanel.add(checkoutButton);
+
+        cartContentPanel.add(summaryPanel, BorderLayout.SOUTH);
+        panel.add(cartContentPanel, BorderLayout.CENTER);
 
         return panel;
+    }
+
+    private JPanel createCartItemPanel(int cartId, String productName, double price, int quantity, String color, String size) {
+        JPanel itemPanel = new JPanel(new BorderLayout(10, 10));
+        itemPanel.setBackground(ThemeColors.CARD_BG);
+        itemPanel.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createMatteBorder(0, 0, 1, 0, ThemeColors.BACKGROUND),
+            BorderFactory.createEmptyBorder(15, 15, 15, 15)
+        ));
+        itemPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 120));
+
+        // Main content panel with image and details
+        JPanel contentPanel = new JPanel(new BorderLayout(15, 0));
+        contentPanel.setOpaque(false);
+
+        // Product image placeholder (left side)
+        JPanel imagePanel = new JPanel();
+        imagePanel.setPreferredSize(new Dimension(80, 80));
+        imagePanel.setBackground(ThemeColors.BACKGROUND);
+        imagePanel.setBorder(BorderFactory.createLineBorder(ThemeColors.SECONDARY, 1));
+        // You would load the actual product image here
+        JLabel imageLabel = new JLabel("Image", SwingConstants.CENTER);
+        imagePanel.add(imageLabel);
+        contentPanel.add(imagePanel, BorderLayout.WEST);
+
+        // Product info panel (center)
+        JPanel infoPanel = new JPanel();
+        infoPanel.setLayout(new BoxLayout(infoPanel, BoxLayout.Y_AXIS));
+        infoPanel.setOpaque(false);
+
+        // Product name
+        JLabel nameLabel = new JLabel(productName);
+        nameLabel.setFont(new Font("Arial", Font.BOLD, 16));
+        nameLabel.setForeground(ThemeColors.TEXT);
+        nameLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        // Product details (color, size)
+        JLabel detailsLabel = new JLabel("Color: " + (color != null ? color : "Default") + 
+                              " | Size: " + (size != null ? size : "Default"));
+        detailsLabel.setFont(new Font("Arial", Font.PLAIN, 12));
+        detailsLabel.setForeground(ThemeColors.TEXT);
+        detailsLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        // Product price
+        JLabel priceLabel = new JLabel(String.format("£%.2f", price));
+        priceLabel.setFont(new Font("Arial", Font.BOLD, 14));
+        priceLabel.setForeground(ThemeColors.PRIMARY);
+        priceLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        infoPanel.add(nameLabel);
+        infoPanel.add(Box.createRigidArea(new Dimension(0, 5)));
+        infoPanel.add(detailsLabel);
+        infoPanel.add(Box.createRigidArea(new Dimension(0, 5)));
+        infoPanel.add(priceLabel);
+        contentPanel.add(infoPanel, BorderLayout.CENTER);
+
+        // Right side controls (quantity and remove)
+        JPanel rightPanel = new JPanel();
+        rightPanel.setLayout(new BoxLayout(rightPanel, BoxLayout.Y_AXIS));
+        rightPanel.setOpaque(false);
+
+        // Quantity controls
+        JPanel quantityPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 5, 0));
+        quantityPanel.setOpaque(false);
+        quantityPanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 10, 0));
+
+        JButton minusButton = new JButton("-");
+        styleQuantityButton(minusButton);
+        minusButton.addActionListener(e -> {
+            updateCartItemQuantity(cartId, quantity - 1, null);
+            calculateSelectedTotal();
+        });
+
+        JLabel qtyLabel = new JLabel(String.valueOf(quantity));
+        qtyLabel.setFont(new Font("Arial", Font.PLAIN, 14));
+        qtyLabel.setForeground(ThemeColors.TEXT);
+        qtyLabel.setPreferredSize(new Dimension(30, 30));
+
+        JButton plusButton = new JButton("+");
+        styleQuantityButton(plusButton);
+        plusButton.addActionListener(e -> {
+            updateCartItemQuantity(cartId, quantity + 1, null);
+            calculateSelectedTotal();
+        });
+
+        quantityPanel.add(minusButton);
+        quantityPanel.add(qtyLabel);
+        quantityPanel.add(plusButton);
+        rightPanel.add(quantityPanel);
+
+        // Remove button
+        JButton removeButton = new JButton("Remove");
+        removeButton.setFont(new Font("Arial", Font.BOLD, 12));
+        removeButton.setForeground(new Color(200, 0, 0));
+        removeButton.setContentAreaFilled(false);
+        removeButton.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
+        removeButton.addActionListener(e -> {
+            removeCartItem(cartId);
+            calculateSelectedTotal();
+        });
+        rightPanel.add(removeButton);
+
+        contentPanel.add(rightPanel, BorderLayout.EAST);
+        itemPanel.add(contentPanel, BorderLayout.CENTER);
+
+        // Store cart ID in the panel for later reference
+        itemPanel.putClientProperty("cartId", cartId);
+        itemPanel.putClientProperty("price", price);
+        itemPanel.putClientProperty("quantity", quantity);
+
+        return itemPanel;
+    }
+
+    private void styleQuantityButton(JButton button) {
+        button.setFont(new Font("Arial", Font.BOLD, 12));
+        button.setBackground(ThemeColors.SECONDARY);
+        button.setForeground(Color.WHITE);
+        button.setFocusPainted(false);
+        button.setPreferredSize(new Dimension(25, 25));
+        button.setBorder(BorderFactory.createLineBorder(ThemeColors.SECONDARY, 1));
+    }
+
+    private void updateCartItemQuantity(int cartId, int newQuantity, JLabel qtyLabel) {
+        if (newQuantity < 1) {
+            removeCartItem(cartId);
+            return;
+        }
+
+        try (Connection conn = DBConnection.connect();
+             PreparedStatement stmt = conn.prepareStatement(
+                 "UPDATE cart SET quantity = ? WHERE id = ?")) {
+
+            stmt.setInt(1, newQuantity);
+            stmt.setInt(2, cartId);
+            stmt.executeUpdate();
+
+            // Only update the label if it's not null
+            if (qtyLabel != null) {
+                qtyLabel.setText(String.valueOf(newQuantity));
+            }
+            loadCartItems(); // Refresh to update total
+
+        } catch (SQLException ex) {
+            System.err.println("Error updating quantity: " + ex.getMessage());
+            JOptionPane.showMessageDialog(this,
+                "Error updating quantity",
+                "Error", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+    
+    private void calculateSelectedTotal() {
+        double total = 0.0;
+
+        for (Component comp : cartItemsPanel.getComponents()) {
+            if (comp instanceof JPanel) {
+                JPanel itemPanel = (JPanel) comp;
+                Component[] components = itemPanel.getComponents();
+                if (components.length > 0 && components[0] instanceof JPanel) {
+                    JPanel contentPanel = (JPanel) components[0];
+                    Component[] contentComponents = contentPanel.getComponents();
+                    if (contentComponents.length > 0 && contentComponents[0] instanceof JCheckBox) {
+                        JCheckBox checkbox = (JCheckBox) contentComponents[0];
+                        if (checkbox.isSelected()) {
+                            double price = (double) checkbox.getClientProperty("price");
+                            int quantity = (int) checkbox.getClientProperty("quantity");
+                            total += price * quantity;
+                        }
+                    }
+                }
+            }
+        }
+
+        cartTotalLabel.setText(String.format("₱%.2f", total));
+    }
+
+    private void removeCartItem(int cartId) {
+        try (Connection conn = DBConnection.connect();
+             PreparedStatement stmt = conn.prepareStatement(
+                 "DELETE FROM cart WHERE id = ?")) {
+
+            stmt.setInt(1, cartId);
+            stmt.executeUpdate();
+            loadCartItems(); // Refresh cart
+
+        } catch (SQLException ex) {
+            System.err.println("Error removing item: " + ex.getMessage());
+            JOptionPane.showMessageDialog(this,
+                "Error removing item from cart",
+                "Error", JOptionPane.ERROR_MESSAGE);
+        }
     }
 
     private JPanel createWishlistPanel() {
@@ -1008,11 +1217,10 @@ public class CustomerFrame extends JFrame {
             stmt.setInt(4, customerId);
 
             int rowsAffected = stmt.executeUpdate();
-            System.out.println("Cart rows affected: " + rowsAffected);
 
             if (rowsAffected > 0) {
                 JOptionPane.showMessageDialog(this, "Product added to cart!");
-                loadCartItems(); // Refresh the view
+                loadCartItems(); // Refresh the cart view
             }
         } catch (SQLException ex) {
             System.err.println("Cart SQL Error: " + ex.getMessage());
@@ -1157,27 +1365,55 @@ public class CustomerFrame extends JFrame {
     }
 
     private void loadCartItems() {
-        cartTableModel.setRowCount(0);
-        String sql = "SELECT p.name, p.price, c.quantity " +
-                    "FROM cart c JOIN products p ON c.product_id = p.id " +
-                    "WHERE c.customer_id = ?";
+        cartItemsPanel.removeAll();
+        cartItemsPanel.setLayout(new BoxLayout(cartItemsPanel, BoxLayout.Y_AXIS));
+        double totalAmount = 0.0;
 
         try (Connection conn = DBConnection.connect();
-             PreparedStatement stmt = conn.prepareStatement(sql)) {
+             PreparedStatement stmt = conn.prepareStatement(
+                 "SELECT c.id, p.name, p.price, c.quantity, p.color, p.size " +
+                 "FROM cart c JOIN products p ON c.product_id = p.id " +
+                 "WHERE c.customer_id = ?")) {
+
             stmt.setInt(1, customerId);
             ResultSet rs = stmt.executeQuery();
 
-            while (rs.next()) {
-                cartTableModel.addRow(new Object[]{
-                    rs.getString("name"),
-                    rs.getDouble("price"),
-                    rs.getInt("quantity"),
-                    rs.getDouble("price") * rs.getInt("quantity")
-                });
+            while (rs.next()) { 
+                int cartId = rs.getInt("id");
+                String name = rs.getString("name");
+                double price = rs.getDouble("price");
+                int quantity = rs.getInt("quantity");
+                String color = rs.getString("color");
+                String size = rs.getString("size");
+
+                JPanel itemPanel = createCartItemPanel(
+                    cartId, 
+                    name, 
+                    price, 
+                    quantity, 
+                    color, 
+                    size
+                );
+                // Store cart ID in the panel for later reference
+                itemPanel.putClientProperty("cartId", cartId);
+
+                cartItemsPanel.add(itemPanel);
+                cartItemsPanel.add(Box.createRigidArea(new Dimension(0, 10)));
+
+                totalAmount += price * quantity;
             }
+
+            cartTotalLabel.setText(String.format("₱%.2f", totalAmount));
+
         } catch (SQLException ex) {
             System.err.println("Error loading cart: " + ex.getMessage());
+            JOptionPane.showMessageDialog(this, 
+                "Error loading cart items", 
+                "Error", JOptionPane.ERROR_MESSAGE);
         }
+
+        cartItemsPanel.revalidate();
+        cartItemsPanel.repaint();
     }
 
     private void loadWishlist() {
@@ -1259,12 +1495,41 @@ public class CustomerFrame extends JFrame {
     }
 
     private void checkout() {
-        if (cartTableModel.getRowCount() > 0) {
-            new PaymentFrame(customerId);
-            dispose();
-        } else {
-            JOptionPane.showMessageDialog(this, "Your cart is empty!", "Error", JOptionPane.ERROR_MESSAGE);
+        List<Integer> selectedCartIds = new ArrayList<>();
+        double totalAmount = 0.0;
+
+        for (Component comp : cartItemsPanel.getComponents()) {
+            if (comp instanceof JPanel) {
+                JPanel itemPanel = (JPanel) comp;
+                Component[] components = itemPanel.getComponents();
+                if (components.length > 0 && components[0] instanceof JPanel) {
+                    JPanel contentPanel = (JPanel) components[0];
+                    Component[] contentComponents = contentPanel.getComponents();
+                    if (contentComponents.length > 0 && contentComponents[0] instanceof JCheckBox) {
+                        JCheckBox checkbox = (JCheckBox) contentComponents[0];
+                        if (checkbox.isSelected()) {
+                            Integer cartId = (Integer) checkbox.getClientProperty("cartId");
+                            selectedCartIds.add(cartId);
+
+                            double price = (double) checkbox.getClientProperty("price");
+                            int quantity = (int) checkbox.getClientProperty("quantity");
+                            totalAmount += price * quantity;
+                        }
+                    }
+                }
+            }
         }
+
+        if (selectedCartIds.isEmpty()) {
+            JOptionPane.showMessageDialog(this, 
+                "Please select at least one item to checkout", 
+                "Error", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
+        // Only proceed with selected items
+        new PaymentFrame(customerId, selectedCartIds);
+        dispose();
     }
 
     private void logout() {

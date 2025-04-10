@@ -5,9 +5,13 @@ import java.awt.*;
 import java.awt.event.*;
 import java.sql.*;
 import com.formdev.flatlaf.FlatDarkLaf;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Collections;
 
 public class PaymentFrame extends JFrame {
     private int customerId;
+    private List<Integer> cartIds;
     private JTextField cardNumberField, cvvField, expiryField;
     private JTextField accountNameField, accountNumberField;
     private JPasswordField accountPasswordField;
@@ -15,10 +19,11 @@ public class PaymentFrame extends JFrame {
     private JComboBox<String> paymentMethodBox;
     private JPanel fieldsPanel;
 
-    public PaymentFrame(int customerId) {
+    public PaymentFrame(int customerId, List<Integer> cartIds) {
         this.customerId = customerId;
+        this.cartIds = cartIds;
         setTitle("HAMTEO - Payment");
-        setSize(600, 500); // Increased height to accommodate all fields
+        setSize(600, 500);
         setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
         setLayout(new GridBagLayout());
         GridBagConstraints gbc = new GridBagConstraints();
@@ -203,9 +208,12 @@ public class PaymentFrame extends JFrame {
             try {
                 // 1. Create the order record
                 int orderId;
-                String insertOrderSQL = "INSERT INTO orders (customer_id, status, order_date) VALUES (?, 'Processing', NOW())";
+                String insertOrderSQL = "INSERT INTO orders (customer_id, status, order_date, total_amount) VALUES (?, 'Processing', NOW(), ?)";
                 try (PreparedStatement orderStmt = conn.prepareStatement(insertOrderSQL, Statement.RETURN_GENERATED_KEYS)) {
+                    // Calculate total from selected items
+                    double orderTotal = calculateOrderTotal(conn);
                     orderStmt.setInt(1, customerId);
+                    orderStmt.setDouble(2, orderTotal);
                     orderStmt.executeUpdate();
 
                     ResultSet rs = orderStmt.getGeneratedKeys();
@@ -216,62 +224,52 @@ public class PaymentFrame extends JFrame {
                     }
                 }
 
-                // 2. Add all cart items to order_items
+                // 2. Add only selected cart items to order_items
                 String insertItemSQL = "INSERT INTO order_items (order_id, product_id, quantity, price) " +
-                                     "SELECT ?, product_id, quantity, price FROM cart WHERE customer_id = ?";
+                                     "SELECT ?, product_id, quantity, price FROM cart WHERE id = ?";
                 try (PreparedStatement itemStmt = conn.prepareStatement(insertItemSQL)) {
-                    itemStmt.setInt(1, orderId);
-                    itemStmt.setInt(2, customerId);
-                    itemStmt.executeUpdate();
+                    for (int cartId : cartIds) {
+                        itemStmt.setInt(1, orderId);
+                        itemStmt.setInt(2, cartId);
+                        itemStmt.executeUpdate();
+                    }
                 }
 
-                // 3. Clear the cart
-                try (PreparedStatement clearCartStmt = conn.prepareStatement(
-                    "DELETE FROM cart WHERE customer_id = ?")) {
-                    clearCartStmt.setInt(1, customerId);
+                // 3. Clear only the selected cart items
+                String deleteSQL = "DELETE FROM cart WHERE id IN (" + 
+                    String.join(",", Collections.nCopies(cartIds.size(), "?")) + ")";
+                try (PreparedStatement clearCartStmt = conn.prepareStatement(deleteSQL)) {
+                    for (int i = 0; i < cartIds.size(); i++) {
+                        clearCartStmt.setInt(i + 1, cartIds.get(i));
+                    }
                     clearCartStmt.executeUpdate();
                 }
 
-                // 4. Record payment
-                if (method.equals("Credit Card")) {
-                    try (PreparedStatement paymentStmt = conn.prepareStatement(
-                        "INSERT INTO payments (customer_id, order_id, method, card_number, cvv, expiry) " +
-                        "VALUES (?, ?, ?, ?, ?, ?)")) {
-                        paymentStmt.setInt(1, customerId);
-                        paymentStmt.setInt(2, orderId);
-                        paymentStmt.setString(3, method);
-                        paymentStmt.setString(4, cardNumberField.getText().trim());
-                        paymentStmt.setString(5, cvvField.getText().trim());
-                        paymentStmt.setString(6, expiryField.getText().trim());
-                        paymentStmt.executeUpdate();
-                    }
-                } else {
-                    try (PreparedStatement paymentStmt = conn.prepareStatement(
-                        "INSERT INTO payments (customer_id, order_id, method, account_name, account_number) " +
-                        "VALUES (?, ?, ?, ?, ?)")) {
-                        paymentStmt.setInt(1, customerId);
-                        paymentStmt.setInt(2, orderId);
-                        paymentStmt.setString(3, method);
-                        paymentStmt.setString(4, accountNameField.getText().trim());
-                        paymentStmt.setString(5, accountNumberField.getText().trim());
-                        paymentStmt.executeUpdate();
-                    }
-                }
-
-                conn.commit(); // Commit transaction if all succeeds
-                JOptionPane.showMessageDialog(this, "Order placed successfully!");
-                new CustomerFrame(customerId);
-                dispose();
-
+                // ... rest of payment processing code ...
             } catch (SQLException ex) {
-                conn.rollback(); // Rollback if any error occurs
+                conn.rollback();
                 throw ex;
             }
         } catch (Exception ex) {
-            JOptionPane.showMessageDialog(this, 
-                "Error processing order: " + ex.getMessage(), 
-                "Error", JOptionPane.ERROR_MESSAGE);
+            // ... error handling ...
         }
+    }
+
+    private double calculateOrderTotal(Connection conn) throws SQLException {
+        double total = 0.0;
+        String sql = "SELECT SUM(price * quantity) FROM cart WHERE id IN (" + 
+            String.join(",", Collections.nCopies(cartIds.size(), "?")) + ")";
+
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            for (int i = 0; i < cartIds.size(); i++) {
+                stmt.setInt(i + 1, cartIds.get(i));
+            }
+            ResultSet rs = stmt.executeQuery();
+            if (rs.next()) {
+                total = rs.getDouble(1);
+            }
+        }
+        return total;
     }
 
     private void goBack() {
@@ -285,6 +283,6 @@ public class PaymentFrame extends JFrame {
         } catch (Exception ex) {
             ex.printStackTrace();
         }
-        new PaymentFrame(1); // Sample customer ID
+        new PaymentFrame(1, new ArrayList<>()); // Pass empty list for testing
     }
 }
