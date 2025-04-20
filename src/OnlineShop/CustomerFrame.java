@@ -40,16 +40,19 @@ public class CustomerFrame extends JFrame {
     
     // Product components
     private JPanel productsPanel;
-    private JPanel productGridPanel; // Now properly initialized first
     private JTextField searchField;
     
     private JPanel cartItemsPanel;
     private JLabel cartTotalLabel;
     
+    private JPanel homeProductGridPanel;
+    private JPanel productsProductGridPanel;
+    
     private JPanel orderTrackingPanel;
 
     public CustomerFrame(int customerId) {
         this.customerId = customerId;
+        this.currentCard = "Home";
         setTitle("케이팝 상점 - K-Pop Merch Store");
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setLayout(new BorderLayout());
@@ -69,10 +72,10 @@ public class CustomerFrame extends JFrame {
         mainPanel = new JPanel(cardLayout);
         mainPanel.setBackground(ThemeColors.BACKGROUND);
 
-        // Initialize productGridPanel first
-        productGridPanel = new JPanel(new GridLayout(0, 4, 20, 20));
-        productGridPanel.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
-        productGridPanel.setBackground(ThemeColors.BACKGROUND);
+        // Initialize productGridPanel ONLY ONCE here
+        productsProductGridPanel = new JPanel(new GridLayout(0, 4, 20, 20));
+        productsProductGridPanel.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
+        productsProductGridPanel.setBackground(ThemeColors.BACKGROUND);
 
         // Create all panels
         JPanel homePanel = createHomePanel();
@@ -341,11 +344,9 @@ public class CustomerFrame extends JFrame {
             BorderFactory.createEmptyBorder(8, 8, 8, 8)
         ));
         searchField.addActionListener(e -> filterProducts());
-        refreshProductDisplay();    
 
         JButton searchButton = createStyledButton("Search", ThemeColors.PRIMARY);
         searchButton.addActionListener(e -> filterProducts());
-        refreshProductDisplay();
 
         searchPanel.add(new JLabel("Search:"));
         searchPanel.add(searchField);
@@ -358,13 +359,13 @@ public class CustomerFrame extends JFrame {
         homePanel.add(topPanel, BorderLayout.NORTH);
 
         // ========== PRODUCT GRID ==========
-        productGridPanel = new JPanel(new GridLayout(0, 4, 20, 20)); // Initialize with 4-column grid
-        productGridPanel.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
-        productGridPanel.setBackground(ThemeColors.BACKGROUND);
+        homeProductGridPanel = new JPanel(new GridLayout(0, 4, 20, 20));
+        homeProductGridPanel.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
+        homeProductGridPanel.setBackground(ThemeColors.BACKGROUND);
 
         // Create a wrapper panel for proper scrolling
         JPanel wrapperPanel = new JPanel(new BorderLayout());
-        wrapperPanel.add(productGridPanel, BorderLayout.NORTH);
+        wrapperPanel.add(homeProductGridPanel, BorderLayout.NORTH);
         wrapperPanel.setBackground(ThemeColors.BACKGROUND);
 
         JScrollPane scrollPane = new JScrollPane(wrapperPanel);
@@ -375,55 +376,27 @@ public class CustomerFrame extends JFrame {
 
         homePanel.add(scrollPane, BorderLayout.CENTER);
 
-        // Load initial products
-        loadAllProducts();
+        // Load initial products to home panel
+        loadProductsToPanel(homeProductGridPanel);
 
         return homePanel;
     }
 
     private void loadAllProducts() {
-        if (productGridPanel == null) return;
-        
-        productGridPanel.removeAll();
-        productGridPanel.setLayout(new GridLayout(0, 4, 20, 20)); // 4-column grid
-        productGridPanel.setBackground(ThemeColors.BACKGROUND);
-
-        try (Connection conn = DBConnection.connect();
-            Statement stmt = conn.createStatement();
-            ResultSet rs = stmt.executeQuery("SELECT * FROM products ORDER BY name")) {
-
-           while (rs.next()) {
-               int id = rs.getInt("id");
-               String name = rs.getString("name");
-               String groupName = rs.getString("group_name");
-               double price = rs.getDouble("price");
-               String description = rs.getString("description");
-
-               productGridPanel.add(createProductCard(name, groupName, price, id, description));
-           }
-
-        } catch (SQLException ex) {
-            ex.printStackTrace();
-            JOptionPane.showMessageDialog(this, 
-                "Error loading products: " + ex.getMessage(), 
-                "Error", JOptionPane.ERROR_MESSAGE);
-        }
-
-        refreshProductDisplay();
+        loadProductsToPanel(homeProductGridPanel);
+        loadProductsToPanel(productsProductGridPanel);
     }
     
     private void filterProducts() {
-        if (productGridPanel == null) return;
-        
         String searchText = searchField.getText().trim().toLowerCase();
+        JPanel currentPanel = currentCard.equals("Home") ? homeProductGridPanel : productsProductGridPanel;
 
-        // Clear the current products
-        productGridPanel.removeAll();
-        productGridPanel.setLayout(new GridLayout(0, 4, 20, 20)); // 4-column grid
-        productGridPanel.setBackground(ThemeColors.BACKGROUND);
+        currentPanel.removeAll();
+        currentPanel.setLayout(new GridLayout(0, 4, 20, 20));
+        currentPanel.setBackground(ThemeColors.BACKGROUND);
 
         if (searchText.isEmpty()) {
-            loadAllProducts();
+            loadProductsToPanel(currentPanel);
             return;
         }
 
@@ -432,7 +405,6 @@ public class CustomerFrame extends JFrame {
             PreparedStatement stmt = conn.prepareStatement(query);
             stmt.setString(1, "%" + searchText + "%");
             stmt.setString(2, "%" + searchText + "%");
-
             ResultSet rs = stmt.executeQuery();
             boolean hasResults = false;
 
@@ -443,18 +415,12 @@ public class CustomerFrame extends JFrame {
                 String groupName = rs.getString("group_name");
                 double price = rs.getDouble("price");
                 String description = rs.getString("description");
-
-                productGridPanel.add(createProductCard(name, groupName, price, id, description));
+                currentPanel.add(createProductCard(name, groupName, price, id, description));
             }
 
             if (!hasResults) {
-                productGridPanel.setLayout(new BorderLayout());
-                JLabel noResults = new JLabel("No products found matching '" + searchText + "'", SwingConstants.CENTER);
-                noResults.setFont(new Font("Arial", Font.PLAIN, 16));
-                noResults.setForeground(ThemeColors.TEXT);
-                productGridPanel.add(noResults, BorderLayout.CENTER);
+                showNoResultsMessage(searchText, currentPanel);
             }
-
         } catch (SQLException ex) {
             ex.printStackTrace();
             JOptionPane.showMessageDialog(this, 
@@ -462,27 +428,23 @@ public class CustomerFrame extends JFrame {
                 "Error", JOptionPane.ERROR_MESSAGE);
         }
 
-        // Force complete UI refresh
-        refreshProductDisplay();
+        currentPanel.revalidate();
+        currentPanel.repaint();
     }
-    
-    private void showNoResultsMessage(String searchText) {
-        productGridPanel.removeAll();
-        productGridPanel.setLayout(new BorderLayout());
 
-        JLabel noResults = new JLabel("No products found matching '" + searchText + "'", SwingConstants.CENTER);
-        noResults.setFont(new Font("Arial", Font.PLAIN, 16));
-        noResults.setForeground(ThemeColors.TEXT);
-
-        productGridPanel.add(noResults, BorderLayout.CENTER);
+    private void showNoResultsMessage(String searchText, JPanel panel) {
+        JLabel noResultsLabel = new JLabel("No products found matching \"" + searchText + "\"");
+        noResultsLabel.setFont(new Font("Arial", Font.BOLD, 16));
+        noResultsLabel.setForeground(Color.GRAY);
+        panel.add(noResultsLabel);
     }
 
     private void refreshProductDisplay() {
-        if (productGridPanel != null) {
-            productGridPanel.revalidate();
-            productGridPanel.repaint();
+        if (productsProductGridPanel != null) {
+            productsProductGridPanel.revalidate();
+            productsProductGridPanel.repaint();
             
-            Container parent = productGridPanel.getParent();
+            Container parent = productsProductGridPanel.getParent();
             if (parent != null) {
                 parent.revalidate();
                 parent.repaint();
@@ -689,16 +651,54 @@ public class CustomerFrame extends JFrame {
         backButton.addActionListener(e -> showCard("Home"));
         panel.add(backButton, BorderLayout.NORTH);
 
-        productGridPanel = new JPanel(new WrapLayout(FlowLayout.LEFT, 20, 20));
-        productGridPanel.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
-        productGridPanel.setBackground(ThemeColors.BACKGROUND);
+        productsProductGridPanel = new JPanel(new WrapLayout(FlowLayout.LEFT, 20, 20));
+        productsProductGridPanel.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
+        productsProductGridPanel.setBackground(ThemeColors.BACKGROUND);
 
-        JScrollPane scrollPane = new JScrollPane(productGridPanel);
+        JScrollPane scrollPane = new JScrollPane(productsProductGridPanel);
         scrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
         scrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
         panel.add(scrollPane, BorderLayout.CENTER);
 
+        // Load products to products panel
+        loadProductsToPanel(productsProductGridPanel);
+
         return panel;
+    }
+    
+    private void loadProductsToPanel(JPanel targetPanel) {
+        targetPanel.removeAll();
+
+        try (Connection conn = DBConnection.connect();
+             Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery("SELECT * FROM products ORDER BY name")) {
+
+            boolean hasResults = false;
+            while (rs.next()) {
+                hasResults = true;
+                int id = rs.getInt("id");
+                String name = rs.getString("name");
+                String groupName = rs.getString("group_name");
+                double price = rs.getDouble("price");
+                String description = rs.getString("description");
+                targetPanel.add(createProductCard(name, groupName, price, id, description));
+            }
+
+            if (!hasResults) {
+                JLabel noProductsLabel = new JLabel("No products available.");
+                noProductsLabel.setFont(new Font("Arial", Font.BOLD, 16));
+                noProductsLabel.setForeground(Color.GRAY);
+                targetPanel.add(noProductsLabel);
+            }
+        } catch (SQLException ex) {
+            ex.printStackTrace();
+            JOptionPane.showMessageDialog(this, 
+                "Error loading products: " + ex.getMessage(), 
+                "Error", JOptionPane.ERROR_MESSAGE);
+        }
+
+        targetPanel.revalidate();
+        targetPanel.repaint();
     }
 
     private JPanel createCartPanel() {
