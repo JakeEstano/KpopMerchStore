@@ -200,7 +200,13 @@ public class PaymentFrame extends JFrame {
     }
 
     private void processPayment() {
+        // Validate payment fields first
+        if (!validatePaymentFields()) {
+            return;
+        }
+
         String method = (String) paymentMethodBox.getSelectedItem();
+        String paymentDetails = getPaymentDetails(method);
 
         try (Connection conn = DBConnection.connect()) {
             conn.setAutoCommit(false); // Start transaction
@@ -208,9 +214,9 @@ public class PaymentFrame extends JFrame {
             try {
                 // 1. Create the order record
                 int orderId;
-                String insertOrderSQL = "INSERT INTO orders (customer_id, status, order_date, total_amount) VALUES (?, 'Processing', NOW(), ?)";
+                String insertOrderSQL = "INSERT INTO orders (customer_id, status, order_date, total_price) " +
+                                     "VALUES (?, 'Processing', NOW(), ?)";
                 try (PreparedStatement orderStmt = conn.prepareStatement(insertOrderSQL, Statement.RETURN_GENERATED_KEYS)) {
-                    // Calculate total from selected items
                     double orderTotal = calculateOrderTotal(conn);
                     orderStmt.setInt(1, customerId);
                     orderStmt.setDouble(2, orderTotal);
@@ -224,7 +230,7 @@ public class PaymentFrame extends JFrame {
                     }
                 }
 
-                // 2. Add only selected cart items to order_items
+                // 2. Add order items
                 String insertItemSQL = "INSERT INTO order_items (order_id, product_id, quantity, price) " +
                                      "SELECT ?, product_id, quantity, price FROM cart WHERE id = ?";
                 try (PreparedStatement itemStmt = conn.prepareStatement(insertItemSQL)) {
@@ -235,7 +241,32 @@ public class PaymentFrame extends JFrame {
                     }
                 }
 
-                // 3. Clear only the selected cart items
+                // 3. Create payment record
+                String insertPaymentSQL = "INSERT INTO payments (customer_id, order_id, method, " +
+                                        "card_number, cvv, expiry, account_name, account_number) " +
+                                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+                try (PreparedStatement paymentStmt = conn.prepareStatement(insertPaymentSQL)) {
+                    paymentStmt.setInt(1, customerId);
+                    paymentStmt.setInt(2, orderId);
+                    paymentStmt.setString(3, method);
+                    
+                    if (method.equals("Credit Card")) {
+                        paymentStmt.setString(4, cardNumberField.getText());
+                        paymentStmt.setString(5, cvvField.getText());
+                        paymentStmt.setString(6, expiryField.getText());
+                        paymentStmt.setNull(7, Types.VARCHAR);
+                        paymentStmt.setNull(8, Types.VARCHAR);
+                    } else {
+                        paymentStmt.setNull(4, Types.VARCHAR);
+                        paymentStmt.setNull(5, Types.VARCHAR);
+                        paymentStmt.setNull(6, Types.VARCHAR);
+                        paymentStmt.setString(7, accountNameField.getText());
+                        paymentStmt.setString(8, accountNumberField.getText());
+                    }
+                    paymentStmt.executeUpdate();
+                }
+
+                // 4. Clear cart items
                 String deleteSQL = "DELETE FROM cart WHERE id IN (" + 
                     String.join(",", Collections.nCopies(cartIds.size(), "?")) + ")";
                 try (PreparedStatement clearCartStmt = conn.prepareStatement(deleteSQL)) {
@@ -245,13 +276,96 @@ public class PaymentFrame extends JFrame {
                     clearCartStmt.executeUpdate();
                 }
 
-                // ... rest of payment processing code ...
+                // 5. Update loyalty points (example: 1 point per $10 spent)
+                String updateLoyaltySQL = "UPDATE customers SET loyalty_points = loyalty_points + FLOOR(? / 10) WHERE id = ?";
+                try (PreparedStatement loyaltyStmt = conn.prepareStatement(updateLoyaltySQL)) {
+                    double orderTotal = calculateOrderTotal(conn);
+                    loyaltyStmt.setDouble(1, orderTotal);
+                    loyaltyStmt.setInt(2, customerId);
+                    loyaltyStmt.executeUpdate();
+                }
+
+                conn.commit(); // Commit transaction if all succeeds
+
+                // Show success message
+                JOptionPane.showMessageDialog(this,
+                    "Payment processed successfully!\nOrder ID: ORD" + orderId,
+                    "Success", JOptionPane.INFORMATION_MESSAGE);
+
+                // Close payment window and return to customer view
+                new CustomerFrame(customerId);
+                dispose();
+
             } catch (SQLException ex) {
                 conn.rollback();
-                throw ex;
+                JOptionPane.showMessageDialog(this,
+                    "Payment failed: " + ex.getMessage(),
+                    "Error", JOptionPane.ERROR_MESSAGE);
+                ex.printStackTrace();
             }
-        } catch (Exception ex) {
-            // ... error handling ...
+        } catch (SQLException ex) {
+            JOptionPane.showMessageDialog(this,
+                "Database error: " + ex.getMessage(),
+                "Error", JOptionPane.ERROR_MESSAGE);
+            ex.printStackTrace();
+        }
+    }
+
+    private boolean validatePaymentFields() {
+        String method = (String) paymentMethodBox.getSelectedItem();
+        
+        if (method.equals("Credit Card")) {
+            if (cardNumberField.getText().trim().isEmpty() || 
+                cvvField.getText().trim().isEmpty() || 
+                expiryField.getText().trim().isEmpty()) {
+                JOptionPane.showMessageDialog(this,
+                    "Please fill all credit card fields",
+                    "Validation Error", JOptionPane.ERROR_MESSAGE);
+                return false;
+            }
+            
+            // Simple card number validation (16 digits)
+            if (!cardNumberField.getText().matches("\\d{16}")) {
+                JOptionPane.showMessageDialog(this,
+                    "Card number must be 16 digits",
+                    "Validation Error", JOptionPane.ERROR_MESSAGE);
+                return false;
+            }
+            
+            // Simple CVV validation (3-4 digits)
+            if (!cvvField.getText().matches("\\d{3,4}")) {
+                JOptionPane.showMessageDialog(this,
+                    "CVV must be 3 or 4 digits",
+                    "Validation Error", JOptionPane.ERROR_MESSAGE);
+                return false;
+            }
+            
+            // Simple expiry date validation (MM/YY format)
+            if (!expiryField.getText().matches("(0[1-9]|1[0-2])/[0-9]{2}")) {
+                JOptionPane.showMessageDialog(this,
+                    "Expiry date must be in MM/YY format",
+                    "Validation Error", JOptionPane.ERROR_MESSAGE);
+                return false;
+            }
+        } else { // Digital wallet
+            if (accountNameField.getText().trim().isEmpty() || 
+                accountNumberField.getText().trim().isEmpty() || 
+                accountPasswordField.getPassword().length == 0) {
+                JOptionPane.showMessageDialog(this,
+                    "Please fill all account fields",
+                    "Validation Error", JOptionPane.ERROR_MESSAGE);
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private String getPaymentDetails(String method) {
+        if (method.equals("Credit Card")) {
+            String cardNumber = cardNumberField.getText();
+            return "Card ending with: " + cardNumber.substring(cardNumber.length() - 4);
+        } else {
+            return accountNameField.getText() + " (" + method + ")";
         }
     }
 
