@@ -21,7 +21,6 @@ public class CustomerFrame extends JFrame {
     private int customerId;
     private JPanel mainPanel;
     private CardLayout cardLayout;
-    private JLabel loyaltyPointsLabel;
     private String currentCategory;
     private String currentCard;
     
@@ -104,7 +103,6 @@ public class CustomerFrame extends JFrame {
 
         // Load data after UI is fully initialized
         SwingUtilities.invokeLater(() -> {
-            loadLoyaltyPoints();
             loadAllProducts();
         });
         
@@ -153,11 +151,6 @@ public class CustomerFrame extends JFrame {
         // User section
         JPanel userPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 0));
         userPanel.setOpaque(false);
-
-        loyaltyPointsLabel = new JLabel("Loyalty: 0 pts");
-        loyaltyPointsLabel.setFont(new Font("Arial", Font.BOLD, 14));
-        loyaltyPointsLabel.setForeground(ThemeColors.TEXT);
-        userPanel.add(loyaltyPointsLabel);
 
         JButton cartButton = new JButton("CART");
         cartButton.setFont(new Font("Arial", Font.BOLD, 12));
@@ -2479,25 +2472,6 @@ public class CustomerFrame extends JFrame {
         ordersPanel.repaint();
     }
     
-    private void loadLoyaltyPoints() {
-        try (Connection conn = DBConnection.connect();
-             PreparedStatement stmt = conn.prepareStatement(
-                 "SELECT loyalty_points FROM customers WHERE id = ?")) {
-            
-            stmt.setInt(1, customerId);
-            ResultSet rs = stmt.executeQuery();
-            
-            if (rs.next()) {
-                int loyalty_points = rs.getInt("loyalty_points");
-                loyaltyPointsLabel.setText("Loyalty: " + loyalty_points + " pts");
-            }
-            
-        } catch (SQLException ex) {
-            ex.printStackTrace();
-            loyaltyPointsLabel.setText("Loyalty: 0 pts");
-        }
-    }
-
     private void checkout() {
         List<Integer> selectedCartIds = new ArrayList<>();
         double totalAmount = 0.0;

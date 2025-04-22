@@ -6,6 +6,10 @@ import java.awt.*;
 import java.awt.event.*;
 import java.sql.*;
 import com.formdev.flatlaf.FlatDarkLaf;
+import java.text.SimpleDateFormat;
+import javax.swing.border.TitledBorder;
+import javax.swing.table.DefaultTableCellRenderer;
+import javax.swing.table.JTableHeader;
 
 public class AdminFrame extends JFrame {
     private JPanel mainPanel;
@@ -63,144 +67,326 @@ public class AdminFrame extends JFrame {
     private JPanel createNavigationBar() {
         JPanel navBar = new JPanel(new BorderLayout());
         navBar.setBackground(ThemeColors.BACKGROUND);
-        navBar.setBorder(BorderFactory.createEmptyBorder(10, 20, 10, 20));
-        navBar.setPreferredSize(new Dimension(200, getHeight()));
+        navBar.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+        navBar.setPreferredSize(new Dimension(220, getHeight())); // Optimal width for buttons
 
-        // Logo
-        JLabel logo = new JLabel("Admin Panel", SwingConstants.CENTER);
-        logo.setFont(new Font("Malgun Gothic", Font.BOLD, 20));
+        // Logo Section
+        JPanel logoPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 10));
+        logoPanel.setOpaque(false);
+
+        JLabel logo = new JLabel("ADMIN");
+        logo.setFont(new Font("Arial", Font.BOLD, 16));
         logo.setForeground(ThemeColors.PRIMARY);
-        navBar.add(logo, BorderLayout.NORTH);
+        logoPanel.add(logo);
+        navBar.add(logoPanel, BorderLayout.NORTH);
 
-        // Navigation buttons
-        JPanel navButtons = new JPanel(new GridLayout(8, 1, 10, 10));
+        // Navigation Buttons
+        JPanel navButtons = new JPanel();
+        navButtons.setLayout(new BoxLayout(navButtons, BoxLayout.Y_AXIS));
         navButtons.setOpaque(false);
-        navButtons.setBorder(BorderFactory.createEmptyBorder(20, 0, 20, 0));
+        navButtons.setBorder(BorderFactory.createEmptyBorder(15, 0, 15, 0));
 
-        JButton dashboardButton = createNavButton("Dashboard");
-        dashboardButton.addActionListener(e -> cardLayout.show(mainPanel, "Dashboard"));
+        String[] navItems = {"Dashboard", "Users", "Products", "Inventory", "Sales", "Suppliers", "Orders"};
 
-        JButton usersButton = createNavButton("Users");
-        usersButton.addActionListener(e -> {
-            loadUsers();
-            cardLayout.show(mainPanel, "Users");
-        });
+        for (String item : navItems) {
+            JButton btn = createNavButton(item);
+            btn.setAlignmentX(Component.LEFT_ALIGNMENT);
+            navButtons.add(btn);
+            navButtons.add(Box.createRigidArea(new Dimension(0, 8))); // Spacing between buttons
+        }
 
-        JButton productsButton = createNavButton("Products");
-        productsButton.addActionListener(e -> {
-            loadProducts();
-            cardLayout.show(mainPanel, "Products");
-        });
+        JScrollPane scrollPane = new JScrollPane(navButtons);
+        scrollPane.setBorder(null);
+        scrollPane.setOpaque(false);
+        scrollPane.getViewport().setOpaque(false);
+        navBar.add(scrollPane, BorderLayout.CENTER);
 
-        JButton inventoryButton = createNavButton("Inventory");
-        inventoryButton.addActionListener(e -> {
-            loadInventory();
-            cardLayout.show(mainPanel, "Inventory");
-        });
+        // Logout Button
+        JButton logoutBtn = createNavButton("Logout");
+        logoutBtn.setBackground(ThemeColors.SECONDARY);
+        logoutBtn.setForeground(Color.WHITE);
+        logoutBtn.setAlignmentX(Component.LEFT_ALIGNMENT);
 
-        JButton salesButton = createNavButton("Sales");
-        salesButton.addActionListener(e -> {
-            loadSales();
-            cardLayout.show(mainPanel, "Sales");
-        });
+        JPanel bottomPanel = new JPanel();
+        bottomPanel.setLayout(new BoxLayout(bottomPanel, BoxLayout.Y_AXIS));
+        bottomPanel.setOpaque(false);
+        bottomPanel.add(Box.createVerticalGlue());
+        bottomPanel.add(logoutBtn);
+        bottomPanel.add(Box.createRigidArea(new Dimension(0, 10)));
 
-        JButton suppliersButton = createNavButton("Suppliers");
-        suppliersButton.addActionListener(e -> {
-            loadSuppliers();
-            cardLayout.show(mainPanel, "Suppliers");
-        });
+        navBar.add(bottomPanel, BorderLayout.SOUTH);
 
-        JButton ordersButton = createNavButton("Orders");
-        ordersButton.addActionListener(e -> {
-            loadOrders();
-            cardLayout.show(mainPanel, "Orders");
-        });
-
-        JButton logoutButton = createNavButton("Logout");
-        logoutButton.addActionListener(e -> logout());
-
-        navButtons.add(dashboardButton);
-        navButtons.add(usersButton);
-        navButtons.add(productsButton);
-        navButtons.add(inventoryButton);
-        navButtons.add(salesButton);
-        navButtons.add(suppliersButton);
-        navButtons.add(ordersButton);
-        navButtons.add(logoutButton);
-
-        navBar.add(navButtons, BorderLayout.CENTER);
         return navBar;
     }
 
     private JButton createNavButton(String text) {
         JButton button = new JButton(text);
-        button.setFont(new Font("Arial", Font.BOLD, 14));
+
+        // Button styling
+        button.setFont(new Font("Arial", Font.PLAIN, 14));
         button.setForeground(ThemeColors.TEXT);
         button.setBackground(ThemeColors.CARD_BG);
-        button.setBorder(BorderFactory.createEmptyBorder(10, 20, 10, 20));
-        button.setHorizontalAlignment(SwingConstants.LEFT);
         button.setFocusPainted(false);
+
+        // Centered text configuration - both horizontally and vertically
+        button.setHorizontalAlignment(SwingConstants.CENTER);
+        button.setVerticalAlignment(SwingConstants.CENTER);
+
+        // Border and sizing
+        button.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createMatteBorder(0, 0, 1, 0, ThemeColors.SECONDARY),
+            BorderFactory.createEmptyBorder(12, 15, 12, 15)
+        ));
+        button.setPreferredSize(new Dimension(200, 40));
+        button.setMaximumSize(new Dimension(200, 40));
+        button.setMinimumSize(new Dimension(200, 40));
+
+        // Icon configuration (optional)
+        try {
+            ImageIcon icon = new ImageIcon(getClass().getResource("/icons/" + text.toLowerCase() + ".png"));
+            button.setIcon(icon);
+            button.setHorizontalTextPosition(SwingConstants.CENTER);
+            button.setVerticalTextPosition(SwingConstants.CENTER); // Changed from BOTTOM to CENTER
+            button.setIconTextGap(8);
+        } catch (Exception e) {
+            // Continue without icon if not found
+        }
+
+        // Action listeners for all navigation buttons
+        switch(text) {
+            case "Dashboard":
+                button.addActionListener(e -> cardLayout.show(mainPanel, "Dashboard"));
+                break;
+            case "Users":
+                button.addActionListener(e -> {
+                    loadUsers();
+                    cardLayout.show(mainPanel, "Users");
+                });
+                break;
+            case "Products":
+                button.addActionListener(e -> {
+                    loadProducts();
+                    cardLayout.show(mainPanel, "Products");
+                });
+                break;
+            case "Inventory":
+                button.addActionListener(e -> {
+                    loadInventory();
+                    cardLayout.show(mainPanel, "Inventory");
+                });
+                break;
+            case "Sales":
+                button.addActionListener(e -> {
+                    loadSales();
+                    cardLayout.show(mainPanel, "Sales");
+                });
+                break;
+            case "Suppliers":
+                button.addActionListener(e -> {
+                    loadSuppliers();
+                    cardLayout.show(mainPanel, "Suppliers");
+                });
+                break;
+            case "Orders":
+                button.addActionListener(e -> {
+                    loadOrders();
+                    cardLayout.show(mainPanel, "Orders");
+                });
+                break;
+            case "Logout":
+                button.addActionListener(e -> logout());
+                break;
+        }
+
+        // Hover effects
         button.addMouseListener(new MouseAdapter() {
             @Override
             public void mouseEntered(MouseEvent e) {
-                button.setBackground(ThemeColors.PRIMARY);
+                button.setBackground(ThemeColors.BUTTON_HOVER);
                 button.setForeground(Color.WHITE);
+                button.setCursor(new Cursor(Cursor.HAND_CURSOR));
             }
+
             @Override
             public void mouseExited(MouseEvent e) {
                 button.setBackground(ThemeColors.CARD_BG);
                 button.setForeground(ThemeColors.TEXT);
+                button.setCursor(new Cursor(Cursor.DEFAULT_CURSOR));
             }
         });
+
         return button;
     }
 
     private JPanel createDashboardPanel() {
         JPanel dashboardPanel = new JPanel(new BorderLayout());
         dashboardPanel.setBackground(ThemeColors.BACKGROUND);
+        dashboardPanel.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
 
         // Title
         JLabel titleLabel = new JLabel("Admin Dashboard", SwingConstants.CENTER);
         titleLabel.setFont(new Font("Arial", Font.BOLD, 24));
         titleLabel.setForeground(ThemeColors.PRIMARY);
-        titleLabel.setBorder(BorderFactory.createEmptyBorder(20, 0, 20, 0));
+        titleLabel.setBorder(BorderFactory.createEmptyBorder(10, 0, 20, 0));
         dashboardPanel.add(titleLabel, BorderLayout.NORTH);
 
-        // Metrics grid
+        // Main content panel
+        JPanel contentPanel = new JPanel(new BorderLayout(10, 10));
+        contentPanel.setBackground(ThemeColors.BACKGROUND);
+
+        // Metrics panel
         JPanel metricsPanel = new JPanel(new GridLayout(2, 3, 20, 20));
-        metricsPanel.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
+        metricsPanel.setBorder(BorderFactory.createEmptyBorder(0, 20, 20, 20));
         metricsPanel.setBackground(ThemeColors.BACKGROUND);
 
-        // Add metric cards
-        metricsPanel.add(createMetricCard("Total Products", getTotalProducts()));
-        metricsPanel.add(createMetricCard("Total Orders", getTotalOrders()));
-        metricsPanel.add(createMetricCard("Low Stock Items", getLowStockItems()));
-        metricsPanel.add(createMetricCard("Total Customers", getTotalCustomers()));
-        metricsPanel.add(createMetricCard("Total Revenue", getTotalRevenue()));
-        metricsPanel.add(createMetricCard("Pending Orders", getPendingOrders()));
+        metricsPanel.add(createMetricCard("Total Products", getTotalProducts(), "images/products_icon.png"));
+        metricsPanel.add(createMetricCard("Total Orders", getTotalOrders(), "images/orders_icon.png"));
+        metricsPanel.add(createMetricCard("Low Stock Items", getLowStockItems(), "images/warning_icon.png"));
+        metricsPanel.add(createMetricCard("Total Customers", getTotalCustomers(), "images/customers_icon.png"));
+        metricsPanel.add(createMetricCard("Total Revenue", getTotalRevenue(), "images/revenue_icon.png"));
+        metricsPanel.add(createMetricCard("Pending Orders", getPendingOrders(), "images/pending_icon.png"));
 
-        dashboardPanel.add(metricsPanel, BorderLayout.CENTER);
+        contentPanel.add(metricsPanel, BorderLayout.NORTH);
+
+        // Real-time Order Notifications Panel
+        JPanel notificationsPanel = new JPanel(new BorderLayout());
+        notificationsPanel.setBorder(BorderFactory.createTitledBorder(
+            BorderFactory.createLineBorder(ThemeColors.SECONDARY),
+            "New Order Notifications",
+            TitledBorder.LEFT,
+            TitledBorder.TOP,
+            new Font("Arial", Font.BOLD, 16),
+            ThemeColors.PRIMARY
+        ));
+        notificationsPanel.setBackground(ThemeColors.BACKGROUND);
+
+        // Notifications Table
+        DefaultTableModel notificationsModel = new DefaultTableModel(
+            new String[]{"Time", "Order #", "Customer", "Amount", "Items"}, 0) {
+            @Override
+            public boolean isCellEditable(int row, int column) {
+                return false;
+            }
+        };
+
+        JTable notificationsTable = new JTable(notificationsModel);
+        styleTable(notificationsTable);
+        notificationsTable.setRowHeight(30);
+
+        // Load initial notifications
+        loadOrderNotifications(notificationsModel);
+
+        // Auto-refresh every 15 seconds
+        Timer refreshTimer = new Timer(15000, e -> {
+            int previousRowCount = notificationsModel.getRowCount();
+            loadOrderNotifications(notificationsModel);
+
+            // Show visual alert if new orders arrived
+            if (notificationsModel.getRowCount() > previousRowCount) {
+                Toolkit.getDefaultToolkit().beep();
+                notificationsPanel.setBorder(BorderFactory.createTitledBorder(
+                    BorderFactory.createLineBorder(ThemeColors.PRIMARY, 2),
+                    "NEW ORDERS! (" + (notificationsModel.getRowCount() - previousRowCount) + ")",
+                    TitledBorder.LEFT,
+                    TitledBorder.TOP,
+                    new Font("Arial", Font.BOLD, 16),
+                    ThemeColors.PRIMARY
+                ));
+
+                // Reset border after 3 seconds
+                new Timer(3000, ev -> {
+                    notificationsPanel.setBorder(BorderFactory.createTitledBorder(
+                        BorderFactory.createLineBorder(ThemeColors.SECONDARY),
+                        "New Order Notifications",
+                        TitledBorder.LEFT,
+                        TitledBorder.TOP,
+                        new Font("Arial", Font.BOLD, 16),
+                        ThemeColors.PRIMARY
+                    ));
+                    ((Timer)ev.getSource()).stop();
+                }).start();
+            }
+        });
+        refreshTimer.start();
+
+        // Add view button
+        JButton viewOrdersButton = new JButton("View All Orders");
+        viewOrdersButton.addActionListener(e -> {
+            cardLayout.show(mainPanel, "Orders");
+            loadOrders();
+        });
+
+        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        buttonPanel.setOpaque(false);
+        buttonPanel.add(viewOrdersButton);
+
+        notificationsPanel.add(new JScrollPane(notificationsTable), BorderLayout.CENTER);
+        notificationsPanel.add(buttonPanel, BorderLayout.SOUTH);
+
+        contentPanel.add(notificationsPanel, BorderLayout.CENTER);
+        dashboardPanel.add(contentPanel, BorderLayout.CENTER);
+
         return dashboardPanel;
     }
+    
+    private void loadOrderNotifications(DefaultTableModel model) {
+        try (Connection conn = DBConnection.connect();
+             Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery(
+                 "SELECT o.id, c.name, o.total_price, o.order_date, " +
+                 "(SELECT COUNT(*) FROM order_items WHERE order_id = o.id) as item_count " +
+                 "FROM orders o JOIN customers c ON o.customer_id = c.id " +
+                 "WHERE o.order_date >= NOW() - INTERVAL 24 HOUR " +
+                 "ORDER BY o.order_date DESC LIMIT 10")) {
 
-    private JPanel createMetricCard(String title, String value) {
-        JPanel card = new JPanel(new BorderLayout());
+            model.setRowCount(0); // Clear existing data
+            SimpleDateFormat sdf = new SimpleDateFormat("HH:mm");
+
+            while (rs.next()) {
+                String time = sdf.format(rs.getTimestamp("order_date"));
+                String orderId = "#" + rs.getInt("id");
+                String customer = rs.getString("name");
+                String amount = String.format("₱%.2f", rs.getDouble("total_price"));
+                String items = rs.getInt("item_count") + " item(s)";
+
+                model.addRow(new Object[]{time, orderId, customer, amount, items});
+            }
+        } catch (SQLException ex) {
+            ex.printStackTrace();
+            JOptionPane.showMessageDialog(this,
+                "Error loading order notifications",
+                "Error", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+    private JPanel createMetricCard(String title, String value, String iconPath) {
+        JPanel card = new JPanel(new BorderLayout(10, 10));
         card.setBackground(ThemeColors.CARD_BG);
         card.setBorder(BorderFactory.createCompoundBorder(
-            BorderFactory.createLineBorder(ThemeColors.SECONDARY, 1),
-            BorderFactory.createEmptyBorder(20, 20, 20, 20)
+            BorderFactory.createMatteBorder(1, 1, 1, 1, ThemeColors.SECONDARY),
+            BorderFactory.createEmptyBorder(15, 15, 15, 15)
         ));
 
-        JLabel titleLabel = new JLabel(title, SwingConstants.CENTER);
-        titleLabel.setFont(new Font("Arial", Font.BOLD, 16));
+        // Top panel with icon and title
+        JPanel topPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 0));
+        topPanel.setOpaque(false);
+
+        JLabel icon = new JLabel(new ImageIcon(iconPath));
+        JLabel titleLabel = new JLabel(title);
+        titleLabel.setFont(new Font("Arial", Font.BOLD, 14));
         titleLabel.setForeground(ThemeColors.TEXT);
 
+        topPanel.add(icon);
+        topPanel.add(titleLabel);
+
+        // Value display
         JLabel valueLabel = new JLabel(value, SwingConstants.CENTER);
         valueLabel.setFont(new Font("Arial", Font.BOLD, 24));
         valueLabel.setForeground(ThemeColors.PRIMARY);
 
-        card.add(titleLabel, BorderLayout.NORTH);
+        card.add(topPanel, BorderLayout.NORTH);
         card.add(valueLabel, BorderLayout.CENTER);
+
         return card;
     }
 
@@ -225,7 +411,7 @@ public class AdminFrame extends JFrame {
 
     private JPanel createProductsPanel() {
         JPanel panel = createTablePanel("Product Management");
-        productTableModel = new DefaultTableModel(new String[]{"ID", "Name", "Price", "Stock", "Category"}, 0);
+        productTableModel = new DefaultTableModel(new String[]{"ID", "Name", "Price", "Stock", "Group"}, 0);    
         productTable = new JTable(productTableModel);
         styleTable(productTable);
         
@@ -373,13 +559,37 @@ public class AdminFrame extends JFrame {
         table.setBackground(ThemeColors.CARD_BG);
         table.setForeground(ThemeColors.TEXT);
         table.setFont(new Font("Arial", Font.PLAIN, 14));
-        table.setGridColor(ThemeColors.BACKGROUND);
+        table.setGridColor(ThemeColors.SECONDARY);
         table.setSelectionBackground(ThemeColors.PRIMARY);
         table.setSelectionForeground(Color.WHITE);
         table.setRowHeight(30);
-        table.getTableHeader().setFont(new Font("Arial", Font.BOLD, 14));
-        table.getTableHeader().setBackground(ThemeColors.SECONDARY);
-        table.getTableHeader().setForeground(Color.WHITE);
+        table.setShowGrid(true);
+        table.setIntercellSpacing(new Dimension(0, 1));
+
+        // Header styling
+        JTableHeader header = table.getTableHeader();
+        header.setFont(new Font("Arial", Font.BOLD, 14));
+        header.setBackground(ThemeColors.PRIMARY);
+        header.setForeground(Color.WHITE);
+        header.setReorderingAllowed(false);
+
+        // Alternating row colors
+        table.setDefaultRenderer(Object.class, new DefaultTableCellRenderer() {
+            @Override
+            public Component getTableCellRendererComponent(JTable table, Object value,
+                    boolean isSelected, boolean hasFocus, int row, int column) {
+                Component c = super.getTableCellRendererComponent(table, value, 
+                    isSelected, hasFocus, row, column);
+
+                if (!isSelected) {
+                    c.setBackground(row % 2 == 0 ? ThemeColors.CARD_BG : 
+                        new Color(ThemeColors.CARD_BG.getRed() - 10, 
+                                 ThemeColors.CARD_BG.getGreen() - 10, 
+                                 ThemeColors.CARD_BG.getBlue() - 10));
+                }
+                return c;
+            }
+        });
     }
 
     // ========== DATABASE OPERATIONS ==========
@@ -407,15 +617,16 @@ public class AdminFrame extends JFrame {
     private void loadProducts() {
         try (Connection conn = DBConnection.connect();
              Statement stmt = conn.createStatement();
-             ResultSet rs = stmt.executeQuery("SELECT id, name, price, stock, category FROM products")) {
+             ResultSet rs = stmt.executeQuery("SELECT id, name, price, stock, group_name FROM products")) {
+
             productTableModel.setRowCount(0);
             while (rs.next()) {
                 productTableModel.addRow(new Object[]{
                     rs.getInt("id"), 
                     rs.getString("name"), 
-                    rs.getDouble("price"), 
+                    rs.getDouble("price"), // Already in PHP, no conversion needed
                     rs.getInt("stock"), 
-                    rs.getString("category")
+                    rs.getString("group_name")
                 });
             }
         } catch (SQLException ex) {
@@ -587,31 +798,19 @@ public class AdminFrame extends JFrame {
     }
 
     private String getTotalRevenue() {
-        try (Connection conn = DBConnection.connect()) {
-            // First try with total_price column
-            try {
-                PreparedStatement stmt = conn.prepareStatement(
-                    "SELECT SUM(total_price) FROM orders WHERE status = 'Delivered'");
-                ResultSet rs = stmt.executeQuery();
-                if (rs.next()) {
-                    return "$" + rs.getString(1);
-                }
-            } catch (SQLException e) {
-                // If that fails, calculate it from order_items
-                PreparedStatement stmt = conn.prepareStatement(
-                    "SELECT SUM(oi.price * oi.quantity) " +
-                    "FROM order_items oi " +
-                    "JOIN orders o ON oi.order_id = o.id " +
-                    "WHERE o.status = 'Delivered'");
-                ResultSet rs = stmt.executeQuery();
-                if (rs.next()) {
-                    return "$" + rs.getString(1);
-                }
+        try (Connection conn = DBConnection.connect();
+             PreparedStatement stmt = conn.prepareStatement(
+                 "SELECT SUM(total_price) FROM orders WHERE status = 'Delivered'")) {
+
+            ResultSet rs = stmt.executeQuery();
+            if (rs.next()) {
+                double total = rs.getDouble(1);
+                return "₱" + String.format("%.2f", total); // Format to 2 decimal places
             }
         } catch (SQLException ex) {
             ex.printStackTrace();
         }
-        return "$0";
+        return "₱0";
     }
 
     private String getPendingOrders() {
@@ -901,7 +1100,7 @@ public class AdminFrame extends JFrame {
         JTextField nameField = new JTextField();
         JTextField priceField = new JTextField();
         JTextField stockField = new JTextField();
-        JTextField categoryField = new JTextField();
+        JTextField groupNameField = new JTextField();
         JTextField descriptionField = new JTextField();
         JTextField supplierField = new JTextField();
 
@@ -911,8 +1110,8 @@ public class AdminFrame extends JFrame {
         formPanel.add(priceField);
         formPanel.add(new JLabel("Stock:"));
         formPanel.add(stockField);
-        formPanel.add(new JLabel("Category:"));
-        formPanel.add(categoryField);
+        formPanel.add(new JLabel("Group Name:")); 
+        formPanel.add(groupNameField);
         formPanel.add(new JLabel("Description:"));
         formPanel.add(descriptionField);
         formPanel.add(new JLabel("Supplier ID:"));
@@ -924,11 +1123,11 @@ public class AdminFrame extends JFrame {
                 String name = nameField.getText();
                 double price = Double.parseDouble(priceField.getText());
                 int stock = Integer.parseInt(stockField.getText());
-                String category = categoryField.getText();
+                String category = groupNameField.getText();
                 String description = descriptionField.getText();
                 int supplierId = Integer.parseInt(supplierField.getText());
 
-                if (saveNewProduct(name, price, stock, category, description, supplierId)) {
+                if (saveNewProduct(name, price, stock, groupNameField.getText(), description, supplierId)) {
                     loadProducts();
                     dialog.dispose();
                     JOptionPane.showMessageDialog(this, "Product added successfully!");
@@ -947,29 +1146,29 @@ public class AdminFrame extends JFrame {
     }
 
     private boolean saveNewProduct(String name, double price, int stock, 
-                                 String category, String description, int supplierId) {
-        try (Connection conn = DBConnection.connect();
-             PreparedStatement stmt = conn.prepareStatement(
-                 "INSERT INTO products (name, price, stock, category, description, supplier_id) " +
-                 "VALUES (?, ?, ?, ?, ?, ?)")) {
-            
-            stmt.setString(1, name);
-            stmt.setDouble(2, price);
-            stmt.setInt(3, stock);
-            stmt.setString(4, category);
-            stmt.setString(5, description);
-            stmt.setInt(6, supplierId);
-            
-            int rowsAffected = stmt.executeUpdate();
-            return rowsAffected > 0;
-        } catch (SQLException ex) {
-            ex.printStackTrace();
-            JOptionPane.showMessageDialog(this, 
-                "Error adding product: " + ex.getMessage(), 
-                "Error", JOptionPane.ERROR_MESSAGE);
-            return false;
-        }
-    }
+                                String groupName, String description, int supplierId) {  // Changed parameter name
+       try (Connection conn = DBConnection.connect();
+            PreparedStatement stmt = conn.prepareStatement(
+                "INSERT INTO products (name, price, stock, group_name, description, supplier_id) " +  // Changed to group_name
+                "VALUES (?, ?, ?, ?, ?, ?)")) {
+
+           stmt.setString(1, name);
+           stmt.setDouble(2, price);
+           stmt.setInt(3, stock);
+           stmt.setString(4, groupName);  // Changed parameter
+           stmt.setString(5, description);
+           stmt.setInt(6, supplierId);
+
+           int rowsAffected = stmt.executeUpdate();
+           return rowsAffected > 0;
+       } catch (SQLException ex) {
+           ex.printStackTrace();
+           JOptionPane.showMessageDialog(this, 
+               "Error adding product: " + ex.getMessage(), 
+               "Error", JOptionPane.ERROR_MESSAGE);
+           return false;
+       }
+   }
 
     private void editProduct() {
         int selectedRow = productTable.getSelectedRow();
@@ -996,7 +1195,7 @@ public class AdminFrame extends JFrame {
         JTextField nameField = new JTextField(currentName);
         JTextField priceField = new JTextField(String.valueOf(currentPrice));
         JTextField stockField = new JTextField(String.valueOf(currentStock));
-        JTextField categoryField = new JTextField(currentCategory);
+        JTextField groupNameField = new JTextField(currentCategory); 
 
         formPanel.add(new JLabel("Product Name:"));
         formPanel.add(nameField);
@@ -1004,8 +1203,8 @@ public class AdminFrame extends JFrame {
         formPanel.add(priceField);
         formPanel.add(new JLabel("Stock:"));
         formPanel.add(stockField);
-        formPanel.add(new JLabel("Category:"));
-        formPanel.add(categoryField);
+        formPanel.add(new JLabel("Group Name:"));
+        formPanel.add(groupNameField);
 
         JButton saveButton = new JButton("Save");
         saveButton.addActionListener(e -> {
@@ -1013,13 +1212,13 @@ public class AdminFrame extends JFrame {
                 String name = nameField.getText();
                 double price = Double.parseDouble(priceField.getText());
                 int stock = Integer.parseInt(stockField.getText());
-                String category = categoryField.getText();
+                String groupName = groupNameField.getText();
 
-                if (updateProduct(productId, name, price, stock, category)) {
+                if (updateProduct(productId, name, price, stock, groupName)) {
                     productTableModel.setValueAt(name, selectedRow, 1);
                     productTableModel.setValueAt(price, selectedRow, 2);
                     productTableModel.setValueAt(stock, selectedRow, 3);
-                    productTableModel.setValueAt(category, selectedRow, 4);
+                    productTableModel.setValueAt(groupName, selectedRow, 4);
                     dialog.dispose();
                     JOptionPane.showMessageDialog(this, "Product updated successfully!");
                 }
@@ -1036,17 +1235,17 @@ public class AdminFrame extends JFrame {
         dialog.setVisible(true);
     }
 
-    private boolean updateProduct(int productId, String name, double price, int stock, String category) {
+    private boolean updateProduct(int productId, String name, double price, int stock, String groupName) {
         try (Connection conn = DBConnection.connect();
              PreparedStatement stmt = conn.prepareStatement(
-                 "UPDATE products SET name = ?, price = ?, stock = ?, category = ? WHERE id = ?")) {
-            
+                 "UPDATE products SET name = ?, price = ?, stock = ?, group_name = ? WHERE id = ?")) {
+
             stmt.setString(1, name);
             stmt.setDouble(2, price);
             stmt.setInt(3, stock);
-            stmt.setString(4, category);
+            stmt.setString(4, groupName);
             stmt.setInt(5, productId);
-            
+
             int rowsAffected = stmt.executeUpdate();
             return rowsAffected > 0;
         } catch (SQLException ex) {

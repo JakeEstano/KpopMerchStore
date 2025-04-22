@@ -85,21 +85,48 @@ public class ProductReviewFrame extends JFrame {
     }
 
     private void loadProducts() {
-        try (Connection conn = DBConnection.connect();
-             PreparedStatement stmt = conn.prepareStatement(
-                 "SELECT DISTINCT p.name " +
-                 "FROM orders o " +
-                 "JOIN order_items oi ON o.id = oi.order_id " +
-                 "JOIN products p ON oi.product_id = p.id " +
-                 "WHERE o.customer_id = ?")) {
-            stmt.setInt(1, customerId);
-            ResultSet rs = stmt.executeQuery();
-            while (rs.next()) {
-                productBox.addItem(rs.getString("name"));
+        try (Connection conn = DBConnection.connect()) {
+            // First, clear any existing items
+            productBox.removeAllItems();
+            
+            // Query for delivered products that haven't been reviewed yet
+            String query = "SELECT DISTINCT p.id, p.name " +
+                         "FROM orders o " +
+                         "JOIN order_items oi ON o.id = oi.order_id " +
+                         "JOIN products p ON oi.product_id = p.id " +
+                         "WHERE o.customer_id = ? " +
+                         "AND o.status = 'Delivered' " +
+                         "AND NOT EXISTS (" +
+                         "   SELECT 1 FROM reviews r " +
+                         "   WHERE r.customer_id = o.customer_id " +
+                         "   AND r.product_id = p.id" +
+                         ")";
+            
+            try (PreparedStatement stmt = conn.prepareStatement(query)) {
+                stmt.setInt(1, customerId);
+                ResultSet rs = stmt.executeQuery();
+                
+                if (!rs.isBeforeFirst()) {
+                    // No products available for review
+                    productBox.addItem("No products available for review");
+                    productBox.setEnabled(false);
+                    submitButton.setEnabled(false);
+                    JOptionPane.showMessageDialog(this, 
+                        "You have no delivered products or you've already reviewed all your delivered products.",
+                        "No Products", 
+                        JOptionPane.INFORMATION_MESSAGE);
+                } else {
+                    while (rs.next()) {
+                        productBox.addItem(rs.getString("name"));
+                    }
+                }
             }
         } catch (SQLException ex) {
             ex.printStackTrace();
-            JOptionPane.showMessageDialog(this, "Error loading products.", "Error", JOptionPane.ERROR_MESSAGE);
+            JOptionPane.showMessageDialog(this, 
+                "Error loading products.", 
+                "Error", 
+                JOptionPane.ERROR_MESSAGE);
         }
     }
 
@@ -108,29 +135,67 @@ public class ProductReviewFrame extends JFrame {
         String review = reviewArea.getText();
         int rating = ratingSlider.getValue();
 
-        if (productName == null || productName.isEmpty()) {
-            JOptionPane.showMessageDialog(this, "Please select a product.", "Error", JOptionPane.ERROR_MESSAGE);
+        if (productName == null || productName.isEmpty() || productName.equals("No products available for review")) {
+            JOptionPane.showMessageDialog(this, 
+                "Please select a valid product.", 
+                "Error", 
+                JOptionPane.ERROR_MESSAGE);
             return;
         }
 
         if (review.isEmpty()) {
-            JOptionPane.showMessageDialog(this, "Please write your review.", "Error", JOptionPane.ERROR_MESSAGE);
+            JOptionPane.showMessageDialog(this, 
+                "Please write your review.", 
+                "Error", 
+                JOptionPane.ERROR_MESSAGE);
             return;
         }
 
-        try (Connection conn = DBConnection.connect();
-             PreparedStatement stmt = conn.prepareStatement(
-                 "INSERT INTO reviews (customer_id, product_id, review, rating) VALUES (?, (SELECT id FROM products WHERE name = ?), ?, ?)")) {
-            stmt.setInt(1, customerId);
-            stmt.setString(2, productName);
-            stmt.setString(3, review);
-            stmt.setInt(4, rating);
-            stmt.executeUpdate();
-            JOptionPane.showMessageDialog(this, "Review submitted successfully!");
-            dispose();
+        try (Connection conn = DBConnection.connect()) {
+            // Check again if the review already exists (just in case)
+            String checkQuery = "SELECT 1 FROM reviews WHERE customer_id = ? AND product_id = (SELECT id FROM products WHERE name = ?)";
+            try (PreparedStatement checkStmt = conn.prepareStatement(checkQuery)) {
+                checkStmt.setInt(1, customerId);
+                checkStmt.setString(2, productName);
+                ResultSet rs = checkStmt.executeQuery();
+                if (rs.next()) {
+                    JOptionPane.showMessageDialog(this, 
+                        "You've already reviewed this product.", 
+                        "Error", 
+                        JOptionPane.ERROR_MESSAGE);
+                    return;
+                }
+            }
+
+            // Insert the review
+            String insertQuery = "INSERT INTO reviews (customer_id, product_id, review, rating, review_date) " +
+                               "VALUES (?, (SELECT id FROM products WHERE name = ?), ?, ?, CURRENT_TIMESTAMP)";
+            try (PreparedStatement stmt = conn.prepareStatement(insertQuery)) {
+                stmt.setInt(1, customerId);
+                stmt.setString(2, productName);
+                stmt.setString(3, review);
+                stmt.setInt(4, rating);
+                int rowsAffected = stmt.executeUpdate();
+                
+                if (rowsAffected > 0) {
+                    JOptionPane.showMessageDialog(this, 
+                        "Review submitted successfully!", 
+                        "Success", 
+                        JOptionPane.INFORMATION_MESSAGE);
+                    dispose();
+                } else {
+                    JOptionPane.showMessageDialog(this, 
+                        "Failed to submit review.", 
+                        "Error", 
+                        JOptionPane.ERROR_MESSAGE);
+                }
+            }
         } catch (SQLException ex) {
             ex.printStackTrace();
-            JOptionPane.showMessageDialog(this, "Error submitting review.", "Error", JOptionPane.ERROR_MESSAGE);
+            JOptionPane.showMessageDialog(this, 
+                "Error submitting review.", 
+                "Error", 
+                JOptionPane.ERROR_MESSAGE);
         }
     }
 }
