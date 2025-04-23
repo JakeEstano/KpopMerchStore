@@ -515,7 +515,7 @@ public class CustomerFrame extends JFrame {
         nameLabel.setFont(new Font("Arial", Font.BOLD, 14));
         nameLabel.setForeground(ThemeColors.TEXT);
 
-        JLabel priceLabel = new JLabel(String.format("₱%.2f", price));
+        JLabel priceLabel = new JLabel(String.format("₱%.2f", price)); // Ensure PHP formatting
         priceLabel.setFont(new Font("Arial", Font.BOLD, 16));
         priceLabel.setForeground(ThemeColors.PRIMARY);
 
@@ -660,38 +660,24 @@ public class CustomerFrame extends JFrame {
     }
     
     private void loadProductsToPanel(JPanel targetPanel) {
-        targetPanel.removeAll();
-
         try (Connection conn = DBConnection.connect();
              Statement stmt = conn.createStatement();
              ResultSet rs = stmt.executeQuery("SELECT * FROM products ORDER BY name")) {
 
-            boolean hasResults = false;
             while (rs.next()) {
-                hasResults = true;
                 int id = rs.getInt("id");
                 String name = rs.getString("name");
                 String groupName = rs.getString("group_name");
-                double price = rs.getDouble("price");
+                double priceUSD = rs.getDouble("price"); // Assume stored in USD
+                double pricePHP = priceUSD * 66.67; // Same conversion rate
                 String description = rs.getString("description");
-                targetPanel.add(createProductCard(name, groupName, price, id, description));
-            }
 
-            if (!hasResults) {
-                JLabel noProductsLabel = new JLabel("No products available.");
-                noProductsLabel.setFont(new Font("Arial", Font.BOLD, 16));
-                noProductsLabel.setForeground(Color.GRAY);
-                targetPanel.add(noProductsLabel);
+                targetPanel.add(createProductCard(name, groupName, pricePHP, id, description));
             }
         } catch (SQLException ex) {
             ex.printStackTrace();
-            JOptionPane.showMessageDialog(this, 
-                "Error loading products: " + ex.getMessage(), 
-                "Error", JOptionPane.ERROR_MESSAGE);
+            JOptionPane.showMessageDialog(this, "Error loading products.", "Error", JOptionPane.ERROR_MESSAGE);
         }
-
-        targetPanel.revalidate();
-        targetPanel.repaint();
     }
 
     private JPanel createCartPanel() {

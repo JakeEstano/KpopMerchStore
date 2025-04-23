@@ -6,10 +6,18 @@ import java.awt.*;
 import java.awt.event.*;
 import java.sql.*;
 import com.formdev.flatlaf.FlatDarkLaf;
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.List;
 import javax.swing.border.TitledBorder;
+import javax.swing.filechooser.FileNameExtensionFilter;
 import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.JTableHeader;
+import javax.swing.table.TableCellRenderer;
 
 public class AdminFrame extends JFrame {
     private JPanel mainPanel;
@@ -17,6 +25,39 @@ public class AdminFrame extends JFrame {
     private JTable userTable, productTable, inventoryTable, salesTable, supplierTable, ordersTable;
     private DefaultTableModel userTableModel, productTableModel, inventoryTableModel, 
                             salesTableModel, supplierTableModel, ordersTableModel;
+
+
+    private class ProductTableModel extends DefaultTableModel {
+        private List<String> imagePaths = new ArrayList<>();
+
+        public ProductTableModel() {
+            super(new String[]{"ID", "Image", "Name", "Price", "Stock", "Group", "Actions"}, 0);
+        }
+
+        @Override
+        public Class<?> getColumnClass(int column) {
+            return column == 1 ? ImageIcon.class : Object.class;
+        }
+
+        public void addRowWithImage(Object[] rowData, String imagePath) {
+            super.addRow(rowData);
+            imagePaths.add(imagePath);
+        }
+
+        public String getImagePath(int row) {
+            return imagePaths.get(row);
+        }
+
+        public void setImagePath(int row, String path) {
+            imagePaths.set(row, path);
+        }
+
+        @Override
+        public void removeRow(int row) {
+            super.removeRow(row);
+            imagePaths.remove(row);
+        }
+    }
 
     public AdminFrame() {
         setTitle("Admin Panel - K-Pop Merch Store");
@@ -68,7 +109,7 @@ public class AdminFrame extends JFrame {
         JPanel navBar = new JPanel(new BorderLayout());
         navBar.setBackground(ThemeColors.BACKGROUND);
         navBar.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
-        navBar.setPreferredSize(new Dimension(220, getHeight())); // Optimal width for buttons
+        navBar.setPreferredSize(new Dimension(220, getHeight()));
 
         // Logo Section
         JPanel logoPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 10));
@@ -92,7 +133,7 @@ public class AdminFrame extends JFrame {
             JButton btn = createNavButton(item);
             btn.setAlignmentX(Component.LEFT_ALIGNMENT);
             navButtons.add(btn);
-            navButtons.add(Box.createRigidArea(new Dimension(0, 8))); // Spacing between buttons
+            navButtons.add(Box.createRigidArea(new Dimension(0, 8)));
         }
 
         JScrollPane scrollPane = new JScrollPane(navButtons);
@@ -127,12 +168,8 @@ public class AdminFrame extends JFrame {
         button.setForeground(ThemeColors.TEXT);
         button.setBackground(ThemeColors.CARD_BG);
         button.setFocusPainted(false);
-
-        // Centered text configuration - both horizontally and vertically
         button.setHorizontalAlignment(SwingConstants.CENTER);
         button.setVerticalAlignment(SwingConstants.CENTER);
-
-        // Border and sizing
         button.setBorder(BorderFactory.createCompoundBorder(
             BorderFactory.createMatteBorder(0, 0, 1, 0, ThemeColors.SECONDARY),
             BorderFactory.createEmptyBorder(12, 15, 12, 15)
@@ -146,7 +183,7 @@ public class AdminFrame extends JFrame {
             ImageIcon icon = new ImageIcon(getClass().getResource("/icons/" + text.toLowerCase() + ".png"));
             button.setIcon(icon);
             button.setHorizontalTextPosition(SwingConstants.CENTER);
-            button.setVerticalTextPosition(SwingConstants.CENTER); // Changed from BOTTOM to CENTER
+            button.setVerticalTextPosition(SwingConstants.CENTER);
             button.setIconTextGap(8);
         } catch (Exception e) {
             // Continue without icon if not found
@@ -339,7 +376,7 @@ public class AdminFrame extends JFrame {
                  "WHERE o.order_date >= NOW() - INTERVAL 24 HOUR " +
                  "ORDER BY o.order_date DESC LIMIT 10")) {
 
-            model.setRowCount(0); // Clear existing data
+            model.setRowCount(0);
             SimpleDateFormat sdf = new SimpleDateFormat("HH:mm");
 
             while (rs.next()) {
@@ -411,30 +448,59 @@ public class AdminFrame extends JFrame {
 
     private JPanel createProductsPanel() {
         JPanel panel = createTablePanel("Product Management");
-        productTableModel = new DefaultTableModel(new String[]{"ID", "Name", "Price", "Stock", "Group"}, 0);    
+        productTableModel = new ProductTableModel();
         productTable = new JTable(productTableModel);
         styleTable(productTable);
-        
+
+        // Set custom renderer for image column
+        productTable.getColumnModel().getColumn(1).setCellRenderer(new ImageRenderer());
+        productTable.setRowHeight(80);
+
         // Add buttons for product management
         JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
         buttonPanel.setOpaque(false);
-        
+
         JButton addProductButton = new JButton("Add Product");
         addProductButton.addActionListener(e -> addProduct());
-        
+
         JButton editProductButton = new JButton("Edit Product");
         editProductButton.addActionListener(e -> editProduct());
-        
+
         JButton deleteProductButton = new JButton("Delete Product");
         deleteProductButton.addActionListener(e -> deleteProduct());
-        
+
         buttonPanel.add(addProductButton);
         buttonPanel.add(editProductButton);
         buttonPanel.add(deleteProductButton);
-        
+
         panel.add(buttonPanel, BorderLayout.SOUTH);
         panel.add(new JScrollPane(productTable), BorderLayout.CENTER);
         return panel;
+    }
+
+    private class ImageRenderer extends DefaultTableCellRenderer {
+        @Override
+        public Component getTableCellRendererComponent(JTable table, Object value, 
+                boolean isSelected, boolean hasFocus, int row, int column) {
+            JLabel label = new JLabel();
+            if (value != null) {
+                ImageIcon icon = (ImageIcon) value;
+                Image image = icon.getImage().getScaledInstance(
+                    table.getRowHeight(), table.getRowHeight(), Image.SCALE_SMOOTH);
+                label.setIcon(new ImageIcon(image));
+            }
+            label.setHorizontalAlignment(JLabel.CENTER);
+            label.setOpaque(true);
+            if (isSelected) {
+                label.setBackground(table.getSelectionBackground());
+            } else {
+                label.setBackground(row % 2 == 0 ? ThemeColors.CARD_BG : 
+                    new Color(ThemeColors.CARD_BG.getRed() - 10, 
+                             ThemeColors.CARD_BG.getGreen() - 10, 
+                             ThemeColors.CARD_BG.getBlue() - 10));
+            }
+            return label;
+        }
     }
 
     private JPanel createInventoryPanel() {
@@ -513,7 +579,7 @@ public class AdminFrame extends JFrame {
         ordersTableModel = new DefaultTableModel(new String[]{"Order ID", "Customer", "Total", "Date", "Status", "Cancellation Request"}, 0) {
             @Override
             public boolean isCellEditable(int row, int column) {
-                return false; // Make table non-editable
+                return false;
             }
         };
         ordersTable = new JTable(ordersTableModel);
@@ -592,8 +658,6 @@ public class AdminFrame extends JFrame {
         });
     }
 
-    // ========== DATABASE OPERATIONS ==========
-
     private void loadUsers() {
         try (Connection conn = DBConnection.connect();
              Statement stmt = conn.createStatement();
@@ -615,19 +679,39 @@ public class AdminFrame extends JFrame {
     }
 
     private void loadProducts() {
-        try (Connection conn = DBConnection.connect();
-             Statement stmt = conn.createStatement();
-             ResultSet rs = stmt.executeQuery("SELECT id, name, price, stock, group_name FROM products")) {
+        productTableModel = new ProductTableModel();
+        productTable.setModel(productTableModel);
 
-            productTableModel.setRowCount(0);
-            while (rs.next()) {
-                productTableModel.addRow(new Object[]{
-                    rs.getInt("id"), 
-                    rs.getString("name"), 
-                    rs.getDouble("price"), // Already in PHP, no conversion needed
-                    rs.getInt("stock"), 
-                    rs.getString("group_name")
-                });
+        try (Connection conn = DBConnection.connect()) {
+            boolean hasImageColumn = false;
+            try (ResultSet columns = conn.getMetaData().getColumns(null, null, "products", "image_path")) {
+                hasImageColumn = columns.next();
+            }
+
+            String query = hasImageColumn 
+                ? "SELECT id, name, price, stock, group_name, image_path FROM products"
+                : "SELECT id, name, price, stock, group_name FROM products";
+
+            try (Statement stmt = conn.createStatement();
+                 ResultSet rs = stmt.executeQuery(query)) {
+
+                while (rs.next()) {
+                    int id = rs.getInt("id");
+                    String name = rs.getString("name");
+                    double price = rs.getDouble("price");
+                    int stock = rs.getInt("stock");
+                    String group = rs.getString("group_name");
+                    String imagePath = hasImageColumn ? rs.getString("image_path") : null;
+
+                    ImageIcon icon = (imagePath != null && !imagePath.isEmpty()) 
+                        ? new ImageIcon(imagePath) 
+                        : new ImageIcon("images/default_product.png");
+
+                    ((ProductTableModel)productTableModel).addRowWithImage(
+                        new Object[]{id, icon, name, price, stock, group, ""},
+                        imagePath
+                    );
+                }
             }
         } catch (SQLException ex) {
             ex.printStackTrace();
@@ -805,7 +889,7 @@ public class AdminFrame extends JFrame {
             ResultSet rs = stmt.executeQuery();
             if (rs.next()) {
                 double total = rs.getDouble(1);
-                return "₱" + String.format("%.2f", total); // Format to 2 decimal places
+                return "₱" + String.format("%.2f", total);
             }
         } catch (SQLException ex) {
             ex.printStackTrace();
@@ -816,7 +900,8 @@ public class AdminFrame extends JFrame {
     private String getPendingOrders() {
         try (Connection conn = DBConnection.connect();
              Statement stmt = conn.createStatement();
-             ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM orders WHERE status = 'Processing'")) {
+             ResultSet rs = stmt.executeQuery(
+                 "SELECT COUNT(*) FROM orders WHERE status IN ('Processing', 'Shipped')")) {
             if (rs.next()) {
                 return rs.getString(1);
             }
@@ -825,8 +910,6 @@ public class AdminFrame extends JFrame {
         }
         return "0";
     }
-
-    // ========== ORDER MANAGEMENT FUNCTIONS ==========
 
     private void updateOrderStatus() {
         int selectedRow = ordersTable.getSelectedRow();
@@ -1004,9 +1087,9 @@ public class AdminFrame extends JFrame {
             options,
             options[2]);
 
-        if (choice == 0) { // Approve
+        if (choice == 0) {
             approveCancellation(orderId, selectedRow);
-        } else if (choice == 1) { // Deny
+        } else if (choice == 1) {
             denyCancellation(orderId, selectedRow);
         }
     }
@@ -1085,49 +1168,144 @@ public class AdminFrame extends JFrame {
         }
     }
 
-    // ========== PRODUCT MANAGEMENT FUNCTIONS ==========
-
     private void addProduct() {
         JDialog dialog = new JDialog(this, "Add New Product", true);
         dialog.setLayout(new BorderLayout());
         dialog.getContentPane().setBackground(ThemeColors.BACKGROUND);
-        dialog.setSize(400, 400);
+        dialog.setSize(600, 600);
 
-        JPanel formPanel = new JPanel(new GridLayout(7, 2, 10, 10));
+        // Main form panel with padding
+        JPanel formPanel = new JPanel();
+        formPanel.setLayout(new BoxLayout(formPanel, BoxLayout.Y_AXIS));
         formPanel.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
         formPanel.setBackground(ThemeColors.BACKGROUND);
 
+        // Form fields panel
+        JPanel fieldsPanel = new JPanel(new GridLayout(0, 2, 15, 15));
+        fieldsPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 20, 10));
+        fieldsPanel.setBackground(ThemeColors.BACKGROUND);
+
+        // Input fields
         JTextField nameField = new JTextField();
         JTextField priceField = new JTextField();
         JTextField stockField = new JTextField();
         JTextField groupNameField = new JTextField();
-        JTextField descriptionField = new JTextField();
+        JTextArea descriptionArea = new JTextArea(3, 20);
+        descriptionArea.setLineWrap(true);
+        descriptionArea.setWrapStyleWord(true);
+        JScrollPane descriptionScroll = new JScrollPane(descriptionArea);
         JTextField supplierField = new JTextField();
 
-        formPanel.add(new JLabel("Product Name:"));
-        formPanel.add(nameField);
-        formPanel.add(new JLabel("Price:"));
-        formPanel.add(priceField);
-        formPanel.add(new JLabel("Stock:"));
-        formPanel.add(stockField);
-        formPanel.add(new JLabel("Group Name:")); 
-        formPanel.add(groupNameField);
-        formPanel.add(new JLabel("Description:"));
-        formPanel.add(descriptionField);
-        formPanel.add(new JLabel("Supplier ID:"));
-        formPanel.add(supplierField);
+        // Image upload components
+        JLabel imagePathLabel = new JLabel("No image selected");
+        imagePathLabel.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
+        JButton browseButton = new JButton("Browse...");
+        JLabel imagePreviewLabel = new JLabel();
+        imagePreviewLabel.setPreferredSize(new Dimension(200, 200));
+        imagePreviewLabel.setHorizontalAlignment(SwingConstants.CENTER);
+        imagePreviewLabel.setBorder(BorderFactory.createLineBorder(ThemeColors.SECONDARY));
 
-        JButton saveButton = new JButton("Save");
+        // Store the selected file path
+        String[] selectedImagePath = {null};
+
+        browseButton.addActionListener(e -> {
+            JFileChooser fileChooser = new JFileChooser();
+            fileChooser.setDialogTitle("Select Product Image");
+            fileChooser.setAcceptAllFileFilterUsed(false);
+
+            // Filter for image files
+            FileNameExtensionFilter filter = new FileNameExtensionFilter(
+                "Image files", "jpg", "jpeg", "png", "gif");
+            fileChooser.addChoosableFileFilter(filter);
+
+            int returnValue = fileChooser.showOpenDialog(null);
+            if (returnValue == JFileChooser.APPROVE_OPTION) {
+                File selectedFile = fileChooser.getSelectedFile();
+                selectedImagePath[0] = selectedFile.getAbsolutePath();
+                imagePathLabel.setText(selectedFile.getName());
+
+                // Display preview
+                ImageIcon icon = new ImageIcon(selectedImagePath[0]);
+                Image image = icon.getImage().getScaledInstance(200, 200, Image.SCALE_SMOOTH);
+                imagePreviewLabel.setIcon(new ImageIcon(image));
+            }
+        });
+
+        // Add fields to form
+        fieldsPanel.add(createFormLabel("Product Name:"));
+        fieldsPanel.add(nameField);
+        fieldsPanel.add(createFormLabel("Price:"));
+        fieldsPanel.add(priceField);
+        fieldsPanel.add(createFormLabel("Stock:"));
+        fieldsPanel.add(stockField);
+        fieldsPanel.add(createFormLabel("Group Name:"));
+        fieldsPanel.add(groupNameField);
+        fieldsPanel.add(createFormLabel("Description:"));
+        fieldsPanel.add(descriptionScroll);
+        fieldsPanel.add(createFormLabel("Supplier ID:"));
+        fieldsPanel.add(supplierField);
+        fieldsPanel.add(createFormLabel("Product Image:"));
+        fieldsPanel.add(browseButton);
+        fieldsPanel.add(createFormLabel("Selected Image:"));
+        fieldsPanel.add(imagePathLabel);
+
+        formPanel.add(fieldsPanel);
+
+        // Image preview panel
+        JPanel previewPanel = new JPanel(new BorderLayout());
+        previewPanel.setBorder(BorderFactory.createTitledBorder("Image Preview"));
+        previewPanel.add(imagePreviewLabel, BorderLayout.CENTER);
+        previewPanel.setBackground(ThemeColors.BACKGROUND);
+        formPanel.add(previewPanel);
+
+        // Button panel
+        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        buttonPanel.setBackground(ThemeColors.BACKGROUND);
+        buttonPanel.setBorder(BorderFactory.createEmptyBorder(10, 0, 0, 0));
+
+        JButton saveButton = new JButton("Save Product");
         saveButton.addActionListener(e -> {
             try {
                 String name = nameField.getText();
                 double price = Double.parseDouble(priceField.getText());
                 int stock = Integer.parseInt(stockField.getText());
-                String category = groupNameField.getText();
-                String description = descriptionField.getText();
+                String groupName = groupNameField.getText();
+                String description = descriptionArea.getText();
                 int supplierId = Integer.parseInt(supplierField.getText());
 
-                if (saveNewProduct(name, price, stock, groupNameField.getText(), description, supplierId)) {
+                // Validate required fields
+                if (name.isEmpty() || groupName.isEmpty()) {
+                    JOptionPane.showMessageDialog(this, 
+                        "Product name and group name are required", 
+                        "Error", JOptionPane.ERROR_MESSAGE);
+                    return;
+                }
+
+                // Handle image
+                String imagePath = null;
+                if (selectedImagePath[0] != null) {
+                    // Create images directory if it doesn't exist
+                    File imagesDir = new File("images/products");
+                    if (!imagesDir.exists()) {
+                        boolean dirsCreated = imagesDir.mkdirs();
+                        if (!dirsCreated) {
+                            throw new IOException("Failed to create directory: " + imagesDir.getAbsolutePath());
+                        }
+                    }
+
+                    // Copy the selected image to our directory
+                    File source = new File(selectedImagePath[0]);
+                    String extension = selectedImagePath[0].substring(selectedImagePath[0].lastIndexOf("."));
+                    String newFileName = "product_" + System.currentTimeMillis() + extension;
+                    File destination = new File(imagesDir, newFileName);
+
+                    Files.copy(source.toPath(), destination.toPath(), StandardCopyOption.REPLACE_EXISTING);
+
+                    // Store relative path in database
+                    imagePath = "images/products/" + newFileName;
+                }
+
+                if (saveNewProduct(name, price, stock, groupName, description, supplierId, imagePath)) {
                     loadProducts();
                     dialog.dispose();
                     JOptionPane.showMessageDialog(this, "Product added successfully!");
@@ -1136,39 +1314,64 @@ public class AdminFrame extends JFrame {
                 JOptionPane.showMessageDialog(this, 
                     "Please enter valid numbers for price, stock, and supplier ID", 
                     "Error", JOptionPane.ERROR_MESSAGE);
+            } catch (IOException ex) {
+                ex.printStackTrace();
+                JOptionPane.showMessageDialog(this, 
+                    "Error saving product image: " + ex.getMessage(), 
+                    "Error", JOptionPane.ERROR_MESSAGE);
             }
         });
 
+        buttonPanel.add(saveButton);
+
+        // Add components to dialog
         dialog.add(formPanel, BorderLayout.CENTER);
-        dialog.add(saveButton, BorderLayout.SOUTH);
+        dialog.add(buttonPanel, BorderLayout.SOUTH);
         dialog.setLocationRelativeTo(this);
         dialog.setVisible(true);
     }
 
     private boolean saveNewProduct(String name, double price, int stock, 
-                                String groupName, String description, int supplierId) {  // Changed parameter name
-       try (Connection conn = DBConnection.connect();
-            PreparedStatement stmt = conn.prepareStatement(
-                "INSERT INTO products (name, price, stock, group_name, description, supplier_id) " +  // Changed to group_name
-                "VALUES (?, ?, ?, ?, ?, ?)")) {
+                                    String groupName, String description, int supplierId, String imagePath) {
+            try (Connection conn = DBConnection.connect()) {
+                // Check if image_path column exists
+                boolean hasImageColumn = false;
+                try (ResultSet columns = conn.getMetaData().getColumns(null, null, "products", "image_path")) {
+                    hasImageColumn = columns.next();
+                }
 
-           stmt.setString(1, name);
-           stmt.setDouble(2, price);
-           stmt.setInt(3, stock);
-           stmt.setString(4, groupName);  // Changed parameter
-           stmt.setString(5, description);
-           stmt.setInt(6, supplierId);
+                String sql;
+                if (hasImageColumn) {
+                    sql = "INSERT INTO products (name, price, stock, group_name, description, supplier_id, image_path) " +
+                          "VALUES (?, ?, ?, ?, ?, ?, ?)";
+                } else {
+                    sql = "INSERT INTO products (name, price, stock, group_name, description, supplier_id) " +
+                          "VALUES (?, ?, ?, ?, ?, ?)";
+                }
 
-           int rowsAffected = stmt.executeUpdate();
-           return rowsAffected > 0;
-       } catch (SQLException ex) {
-           ex.printStackTrace();
-           JOptionPane.showMessageDialog(this, 
-               "Error adding product: " + ex.getMessage(), 
-               "Error", JOptionPane.ERROR_MESSAGE);
-           return false;
-       }
-   }
+                try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+                    stmt.setString(1, name);
+                    stmt.setDouble(2, price);
+                    stmt.setInt(3, stock);
+                    stmt.setString(4, groupName);
+                    stmt.setString(5, description);
+                    stmt.setInt(6, supplierId);
+
+                    if (hasImageColumn) {
+                        stmt.setString(7, imagePath);
+                    }
+
+                    int rowsAffected = stmt.executeUpdate();
+                    return rowsAffected > 0;
+                }
+            } catch (SQLException ex) {
+                ex.printStackTrace();
+                JOptionPane.showMessageDialog(this, 
+                    "Error adding product: " + ex.getMessage(), 
+                    "Error", JOptionPane.ERROR_MESSAGE);
+                return false;
+            }
+        }
 
     private void editProduct() {
         int selectedRow = productTable.getSelectedRow();
@@ -1178,35 +1381,100 @@ public class AdminFrame extends JFrame {
         }
 
         int productId = (int) productTableModel.getValueAt(selectedRow, 0);
-        String currentName = (String) productTableModel.getValueAt(selectedRow, 1);
-        double currentPrice = (double) productTableModel.getValueAt(selectedRow, 2);
-        int currentStock = (int) productTableModel.getValueAt(selectedRow, 3);
-        String currentCategory = (String) productTableModel.getValueAt(selectedRow, 4);
+        String currentName = (String) productTableModel.getValueAt(selectedRow, 2);
+        double currentPrice = (double) productTableModel.getValueAt(selectedRow, 3);
+        int currentStock = (int) productTableModel.getValueAt(selectedRow, 4);
+        String currentGroup = (String) productTableModel.getValueAt(selectedRow, 5);
+        String currentImagePath = ((ProductTableModel)productTableModel).getImagePath(selectedRow);
 
         JDialog dialog = new JDialog(this, "Edit Product", true);
         dialog.setLayout(new BorderLayout());
         dialog.getContentPane().setBackground(ThemeColors.BACKGROUND);
-        dialog.setSize(400, 300);
+        dialog.setSize(600, 500);
 
-        JPanel formPanel = new JPanel(new GridLayout(5, 2, 10, 10));
+        // Main form panel
+        JPanel formPanel = new JPanel();
+        formPanel.setLayout(new BoxLayout(formPanel, BoxLayout.Y_AXIS));
         formPanel.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
         formPanel.setBackground(ThemeColors.BACKGROUND);
 
+        // Fields panel
+        JPanel fieldsPanel = new JPanel(new GridLayout(0, 2, 15, 15));
+        fieldsPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 20, 10));
+        fieldsPanel.setBackground(ThemeColors.BACKGROUND);
+
+        // Input fields
         JTextField nameField = new JTextField(currentName);
         JTextField priceField = new JTextField(String.valueOf(currentPrice));
         JTextField stockField = new JTextField(String.valueOf(currentStock));
-        JTextField groupNameField = new JTextField(currentCategory); 
+        JTextField groupNameField = new JTextField(currentGroup);
 
-        formPanel.add(new JLabel("Product Name:"));
-        formPanel.add(nameField);
-        formPanel.add(new JLabel("Price:"));
-        formPanel.add(priceField);
-        formPanel.add(new JLabel("Stock:"));
-        formPanel.add(stockField);
-        formPanel.add(new JLabel("Group Name:"));
-        formPanel.add(groupNameField);
+        // Image components
+        JLabel imagePathLabel = new JLabel(currentImagePath != null ? 
+            new File(currentImagePath).getName() : "No image selected");
+        imagePathLabel.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
+        JButton browseButton = new JButton("Browse...");
+        JLabel imagePreviewLabel = new JLabel();
+        imagePreviewLabel.setPreferredSize(new Dimension(200, 200));
+        imagePreviewLabel.setHorizontalAlignment(SwingConstants.CENTER);
+        imagePreviewLabel.setBorder(BorderFactory.createLineBorder(ThemeColors.SECONDARY));
 
-        JButton saveButton = new JButton("Save");
+        if (currentImagePath != null) {
+            ImageIcon icon = new ImageIcon(currentImagePath);
+            Image image = icon.getImage().getScaledInstance(200, 200, Image.SCALE_SMOOTH);
+            imagePreviewLabel.setIcon(new ImageIcon(image));
+        }
+
+        String[] selectedImagePath = {currentImagePath};
+
+        browseButton.addActionListener(e -> {
+            JFileChooser fileChooser = new JFileChooser();
+            fileChooser.setDialogTitle("Select Product Image");
+            fileChooser.setAcceptAllFileFilterUsed(false);
+            FileNameExtensionFilter filter = new FileNameExtensionFilter(
+                "Image files", "jpg", "jpeg", "png", "gif");
+            fileChooser.addChoosableFileFilter(filter);
+
+            if (fileChooser.showOpenDialog(null) == JFileChooser.APPROVE_OPTION) {
+                File selectedFile = fileChooser.getSelectedFile();
+                selectedImagePath[0] = selectedFile.getAbsolutePath();
+                imagePathLabel.setText(selectedFile.getName());
+
+                ImageIcon icon = new ImageIcon(selectedImagePath[0]);
+                Image image = icon.getImage().getScaledInstance(200, 200, Image.SCALE_SMOOTH);
+                imagePreviewLabel.setIcon(new ImageIcon(image));
+            }
+        });
+
+        // Add fields to form
+        fieldsPanel.add(createFormLabel("Product Name:"));
+        fieldsPanel.add(nameField);
+        fieldsPanel.add(createFormLabel("Price:"));
+        fieldsPanel.add(priceField);
+        fieldsPanel.add(createFormLabel("Stock:"));
+        fieldsPanel.add(stockField);
+        fieldsPanel.add(createFormLabel("Group Name:"));
+        fieldsPanel.add(groupNameField);
+        fieldsPanel.add(createFormLabel("Product Image:"));
+        fieldsPanel.add(browseButton);
+        fieldsPanel.add(createFormLabel("Selected Image:"));
+        fieldsPanel.add(imagePathLabel);
+
+        formPanel.add(fieldsPanel);
+
+        // Image preview panel
+        JPanel previewPanel = new JPanel(new BorderLayout());
+        previewPanel.setBorder(BorderFactory.createTitledBorder("Image Preview"));
+        previewPanel.add(imagePreviewLabel, BorderLayout.CENTER);
+        previewPanel.setBackground(ThemeColors.BACKGROUND);
+        formPanel.add(previewPanel);
+
+        // Button panel
+        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        buttonPanel.setBackground(ThemeColors.BACKGROUND);
+        buttonPanel.setBorder(BorderFactory.createEmptyBorder(10, 0, 0, 0));
+
+        JButton saveButton = new JButton("Save Changes");
         saveButton.addActionListener(e -> {
             try {
                 String name = nameField.getText();
@@ -1214,11 +1482,30 @@ public class AdminFrame extends JFrame {
                 int stock = Integer.parseInt(stockField.getText());
                 String groupName = groupNameField.getText();
 
-                if (updateProduct(productId, name, price, stock, groupName)) {
-                    productTableModel.setValueAt(name, selectedRow, 1);
-                    productTableModel.setValueAt(price, selectedRow, 2);
-                    productTableModel.setValueAt(stock, selectedRow, 3);
-                    productTableModel.setValueAt(groupName, selectedRow, 4);
+                // Validate required fields
+                if (name.isEmpty() || groupName.isEmpty()) {
+                    JOptionPane.showMessageDialog(this, 
+                        "Product name and group name are required", 
+                        "Error", JOptionPane.ERROR_MESSAGE);
+                    return;
+                }
+
+                // Handle image update
+                String newImagePath = selectedImagePath[0];
+                if (updateProduct(productId, name, price, stock, groupName, newImagePath)) {
+                    // Update the table model
+                    productTableModel.setValueAt(name, selectedRow, 2);
+                    productTableModel.setValueAt(price, selectedRow, 3);
+                    productTableModel.setValueAt(stock, selectedRow, 4);
+                    productTableModel.setValueAt(groupName, selectedRow, 5);
+
+                    // Update the image
+                    ImageIcon icon = (newImagePath != null) 
+                        ? new ImageIcon(newImagePath) 
+                        : new ImageIcon("images/default_product.png");
+                    productTableModel.setValueAt(icon, selectedRow, 1);
+                    ((ProductTableModel)productTableModel).setImagePath(selectedRow, newImagePath);
+
                     dialog.dispose();
                     JOptionPane.showMessageDialog(this, "Product updated successfully!");
                 }
@@ -1229,33 +1516,60 @@ public class AdminFrame extends JFrame {
             }
         });
 
+        buttonPanel.add(saveButton);
+
         dialog.add(formPanel, BorderLayout.CENTER);
-        dialog.add(saveButton, BorderLayout.SOUTH);
+        dialog.add(buttonPanel, BorderLayout.SOUTH);
         dialog.setLocationRelativeTo(this);
         dialog.setVisible(true);
     }
 
-    private boolean updateProduct(int productId, String name, double price, int stock, String groupName) {
-        try (Connection conn = DBConnection.connect();
-             PreparedStatement stmt = conn.prepareStatement(
-                 "UPDATE products SET name = ?, price = ?, stock = ?, group_name = ? WHERE id = ?")) {
-
-            stmt.setString(1, name);
-            stmt.setDouble(2, price);
-            stmt.setInt(3, stock);
-            stmt.setString(4, groupName);
-            stmt.setInt(5, productId);
-
-            int rowsAffected = stmt.executeUpdate();
-            return rowsAffected > 0;
-        } catch (SQLException ex) {
-            ex.printStackTrace();
-            JOptionPane.showMessageDialog(this, 
-                "Error updating product: " + ex.getMessage(), 
-                "Error", JOptionPane.ERROR_MESSAGE);
-            return false;
-        }
+    // Helper method to create consistent form labels
+    private JLabel createFormLabel(String text) {
+        JLabel label = new JLabel(text);
+        label.setFont(new Font("Arial", Font.BOLD, 14));
+        label.setForeground(ThemeColors.TEXT);
+        return label;
     }
+    private boolean updateProduct(int productId, String name, double price, int stock, 
+                                String groupName, String imagePath) {
+         try (Connection conn = DBConnection.connect()) {
+             boolean hasImageColumn = false;
+             try (ResultSet columns = conn.getMetaData().getColumns(null, null, "products", "image_path")) {
+                 hasImageColumn = columns.next();
+             }
+
+             String sql;
+             if (hasImageColumn) {
+                 sql = "UPDATE products SET name = ?, price = ?, stock = ?, group_name = ?, image_path = ? WHERE id = ?";
+             } else {
+                 sql = "UPDATE products SET name = ?, price = ?, stock = ?, group_name = ? WHERE id = ?";
+             }
+
+             try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+                 stmt.setString(1, name);
+                 stmt.setDouble(2, price);
+                 stmt.setInt(3, stock);
+                 stmt.setString(4, groupName);
+
+                 if (hasImageColumn) {
+                     stmt.setString(5, imagePath);
+                     stmt.setInt(6, productId);
+                 } else {
+                     stmt.setInt(5, productId);
+                 }
+
+                 int rowsAffected = stmt.executeUpdate();
+                 return rowsAffected > 0;
+             }
+         } catch (SQLException ex) {
+             ex.printStackTrace();
+             JOptionPane.showMessageDialog(this, 
+                 "Error updating product: " + ex.getMessage(), 
+                 "Error", JOptionPane.ERROR_MESSAGE);
+             return false;
+         }
+     }
 
     private void deleteProduct() {
         int selectedRow = productTable.getSelectedRow();
@@ -1265,7 +1579,7 @@ public class AdminFrame extends JFrame {
         }
 
         int productId = (int) productTableModel.getValueAt(selectedRow, 0);
-        String productName = (String) productTableModel.getValueAt(selectedRow, 1);
+        String productName = (String) productTableModel.getValueAt(selectedRow, 2);
 
         int confirm = JOptionPane.showConfirmDialog(this, 
             "Are you sure you want to delete " + productName + "? This cannot be undone.", 
@@ -1291,8 +1605,6 @@ public class AdminFrame extends JFrame {
             }
         }
     }
-
-    // ========== INVENTORY MANAGEMENT FUNCTIONS ==========
 
     private void updateStock() {
         int selectedRow = inventoryTable.getSelectedRow();
@@ -1391,8 +1703,6 @@ public class AdminFrame extends JFrame {
         }
     }
 
-    // ========== USER MANAGEMENT FUNCTIONS ==========
-
     private void editUser() {
         int selectedRow = userTable.getSelectedRow();
         if (selectedRow < 0) {
@@ -1480,8 +1790,6 @@ public class AdminFrame extends JFrame {
             return false;
         }
     }
-
-    // ========== SUPPLIER MANAGEMENT FUNCTIONS ==========
 
     private void addSupplier() {
         JDialog dialog = new JDialog(this, "Add New Supplier", true);
@@ -1609,8 +1917,6 @@ public class AdminFrame extends JFrame {
             return false;
         }
     }
-
-    // ========== UTILITY METHODS ==========
 
     private void filterSales(String status) {
         loadSales(status);

@@ -7,13 +7,14 @@ import java.sql.*;
 import com.formdev.flatlaf.FlatDarkLaf;
 
 public class RegisterFrame extends JFrame {
-    private JTextField nameField, emailField;
+    private JTextField nameField, emailField, phoneField;
+    private JTextArea addressField;
     private JPasswordField passwordField;
     private JButton registerButton, backButton;
 
     public RegisterFrame() {
         setTitle("HAMTEO - Register");
-        setSize(500, 500);
+        setSize(500, 650); // Increased height to accommodate the address field
         setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
         setLayout(new GridBagLayout());
         GridBagConstraints gbc = new GridBagConstraints();
@@ -44,6 +45,20 @@ public class RegisterFrame extends JFrame {
         add(emailField, gbc);
 
         gbc.gridy = 3; gbc.gridx = 0;
+        add(createFormLabel("Phone:"), gbc);
+        phoneField = createFormTextField();
+        gbc.gridx = 1;
+        add(phoneField, gbc);
+
+        gbc.gridy = 4; gbc.gridx = 0;
+        add(createFormLabel("Address:"), gbc);
+        addressField = createAddressTextArea();
+        JScrollPane addressScrollPane = new JScrollPane(addressField);
+        addressScrollPane.setPreferredSize(new Dimension(200, 80));
+        gbc.gridx = 1;
+        add(addressScrollPane, gbc);
+
+        gbc.gridy = 5; gbc.gridx = 0;
         add(createFormLabel("Password:"), gbc);
         passwordField = createPasswordField();
         gbc.gridx = 1;
@@ -62,7 +77,7 @@ public class RegisterFrame extends JFrame {
         buttonPanel.add(registerButton);
         buttonPanel.add(backButton);
         
-        gbc.gridy = 4; gbc.gridx = 0; gbc.gridwidth = 2;
+        gbc.gridy = 6; gbc.gridx = 0; gbc.gridwidth = 2; // Updated grid y position
         add(buttonPanel, gbc);
 
         setLocationRelativeTo(null);
@@ -86,6 +101,20 @@ public class RegisterFrame extends JFrame {
             BorderFactory.createEmptyBorder(8, 8, 8, 8)
         ));
         return field;
+    }
+
+    private JTextArea createAddressTextArea() {
+        JTextArea area = new JTextArea(3, 20);
+        area.setFont(new Font("Arial", Font.PLAIN, 14));
+        area.setBackground(ThemeColors.CARD_BG);
+        area.setForeground(ThemeColors.TEXT);
+        area.setLineWrap(true);
+        area.setWrapStyleWord(true);
+        area.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(ThemeColors.SECONDARY, 1),
+            BorderFactory.createEmptyBorder(8, 8, 8, 8)
+        ));
+        return area;
     }
 
     private JPasswordField createPasswordField() {
@@ -123,21 +152,31 @@ public class RegisterFrame extends JFrame {
     private void registerUser() {
         String name = nameField.getText();
         String email = emailField.getText();
+        String phone = phoneField.getText();
+        String address = addressField.getText();
         String password = new String(passwordField.getPassword());
 
+        // Basic validation
+        if (name.isEmpty() || email.isEmpty() || phone.isEmpty() || address.isEmpty() || password.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "Please fill in all fields", "Validation Error", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
         try (Connection conn = DBConnection.connect();
-             PreparedStatement stmt = conn.prepareStatement("INSERT INTO customers (name, email, password, role) VALUES (?, ?, ?, ?)")) {
+             PreparedStatement stmt = conn.prepareStatement("INSERT INTO customers (name, email, phone, address, password, role) VALUES (?, ?, ?, ?, ?, ?)")) {
             stmt.setString(1, name);
             stmt.setString(2, email);
-            stmt.setString(3, password);
-            stmt.setString(4, "customer");
+            stmt.setString(3, phone);
+            stmt.setString(4, address);
+            stmt.setString(5, password);
+            stmt.setString(6, "customer");
             stmt.executeUpdate();
             JOptionPane.showMessageDialog(this, "Registration Successful!");
             dispose();
             new LoginFrame();
         } catch (SQLException ex) {
             ex.printStackTrace();
-            JOptionPane.showMessageDialog(this, "Error registering user.", "Error", JOptionPane.ERROR_MESSAGE);
+            JOptionPane.showMessageDialog(this, "Error registering user: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
         }
     }
 
