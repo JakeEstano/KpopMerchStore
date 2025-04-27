@@ -1,27 +1,20 @@
 package OnlineShop;
 
 import javax.swing.*;
-import javax.swing.table.DefaultTableModel;
 import java.awt.*;
 import java.awt.event.*;
 import java.sql.*;
 import com.formdev.flatlaf.FlatDarkLaf;
-import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.FileNotFoundException;
-import java.io.InputStream;
 import java.net.URL;
 import java.util.List;
 import java.util.ArrayList;
-import javax.imageio.ImageIO;
-import java.util.Collections;
-import java.util.Enumeration;
 
 public class CustomerFrame extends JFrame {
     private int customerId;
     private JPanel mainPanel;
     private CardLayout cardLayout;
-    private String currentCategory;
     private String currentCard;
     
     // Navigation buttons
@@ -32,10 +25,6 @@ public class CustomerFrame extends JFrame {
     
     // Wishlist components
     private JPanel wishlistPanel;
-    
-    // Order tracking
-    private DefaultTableModel orderTableModel;
-    private JTable orderTable;
     
     // Product components
     private JPanel productsPanel;
@@ -48,25 +37,34 @@ public class CustomerFrame extends JFrame {
     private JPanel productsProductGridPanel;
     
     private JPanel orderTrackingPanel;
+    
+    private JButton cartButton, wishlistButton, ordersButton;
+    
+    private AddressManager addressManager;
 
     public CustomerFrame(int customerId) {
-        this.customerId = customerId;
-        this.currentCard = "Home";
+        // Set window properties before making it displayable
         setTitle("케이팝 상점 - K-Pop Merch Store");
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setLayout(new BorderLayout());
-        
+
+        // Handle fullscreen/undecorated mode before any displayable operations
         GraphicsEnvironment env = GraphicsEnvironment.getLocalGraphicsEnvironment();
         GraphicsDevice device = env.getDefaultScreenDevice();
-        
+
         if (device.isFullScreenSupported()) {
-            setUndecorated(true);
+            setUndecorated(true);  // Must be called before frame is displayable
             device.setFullScreenWindow(this);
         } else {
             setExtendedState(JFrame.MAXIMIZED_BOTH);
         }
 
-        // Initialize main components first
+        // Initialize instance variables
+        this.customerId = customerId;
+        this.addressManager = new AddressManager(this, customerId);
+        this.currentCard = "Home";
+
+        // Initialize main components
         cardLayout = new CardLayout();
         mainPanel = new JPanel(cardLayout);
         mainPanel.setBackground(ThemeColors.BACKGROUND);
@@ -105,13 +103,18 @@ public class CustomerFrame extends JFrame {
         SwingUtilities.invokeLater(() -> {
             loadAllProducts();
         });
-        
+
         setLocationRelativeTo(null);
         setVisible(true);
     }
 
     private JPanel createNavigationBar() {
-        JPanel navBar = new JPanel(new BorderLayout());
+        JPanel navBar = new JPanel(new BorderLayout()) {
+            @Override
+            public boolean isOptimizedDrawingEnabled() {
+                return false; // Disable optimized drawing to allow overlap
+            }
+        };
         navBar.setBackground(ThemeColors.BACKGROUND);
         navBar.setBorder(BorderFactory.createEmptyBorder(10, 20, 10, 20));
 
@@ -121,24 +124,15 @@ public class CustomerFrame extends JFrame {
         logo.setForeground(ThemeColors.PRIMARY);
         navBar.add(logo, BorderLayout.WEST);
 
-        // Navigation buttons
-        JPanel navButtons = new JPanel(new FlowLayout(FlowLayout.CENTER, 20, 0));
+        // Main navigation buttons
+        JPanel navButtons = new JPanel(new GridLayout(1, 5, 15, 0));
         navButtons.setOpaque(false);
 
         shopButton = createNavButton("SHOP");
-        shopButton.addActionListener(e -> showCard("Home"));
-        
         eventButton = createNavButton("EVENT");
-        eventButton.addActionListener(e -> showCard("Events"));
-        
         faqButton = createNavButton("FAQ");
-        faqButton.addActionListener(e -> showCard("FAQ"));
-        
         noticeButton = createNavButton("NOTICE");
-        noticeButton.addActionListener(e -> showCard("Notices"));
-        
         aboutButton = createNavButton("ABOUT US");
-        aboutButton.addActionListener(e -> showCard("About"));
 
         navButtons.add(shopButton);
         navButtons.add(eventButton);
@@ -146,64 +140,158 @@ public class CustomerFrame extends JFrame {
         navButtons.add(noticeButton);
         navButtons.add(aboutButton);
 
-        navBar.add(navButtons, BorderLayout.CENTER);
+        JPanel centeredNavPanel = new JPanel(new BorderLayout());
+        centeredNavPanel.setOpaque(false);
+        centeredNavPanel.add(navButtons, BorderLayout.CENTER);
+        centeredNavPanel.setBorder(BorderFactory.createEmptyBorder(0, 20, 0, 20));
 
-        // User section
-        JPanel userPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 0));
+        navBar.add(centeredNavPanel, BorderLayout.CENTER);
+
+        // User buttons
+        JPanel userPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 0)) {
+            @Override
+            public boolean isOptimizedDrawingEnabled() {
+                return false; // Allow badge overlap
+            }
+        };
         userPanel.setOpaque(false);
 
-        JButton cartButton = new JButton("CART");
-        cartButton.setFont(new Font("Arial", Font.BOLD, 12));
-        cartButton.setBackground(ThemeColors.SECONDARY);
-        cartButton.setForeground(Color.WHITE);
-        cartButton.setBorder(BorderFactory.createEmptyBorder(5, 15, 5, 15));
-        cartButton.addActionListener(e -> {
-            loadCartItems();
-            showCard("Cart");
-        });
+        cartButton = createBadgeButtonWithCounter("CART", getCartItemCount());
+        wishlistButton = createBadgeButtonWithCounter("WISHLIST", getWishlistItemCount());
+        ordersButton = createBadgeButtonWithCounter("ORDERS", getOrderCount());
+        JButton reviewButton = createUserButton("REVIEWS");
+        JButton logoutButton = createUserButton("LOGOUT");
+
         userPanel.add(cartButton);
-
-        JButton wishlistButton = new JButton("WISHLIST");
-        wishlistButton.setFont(new Font("Arial", Font.BOLD, 12));
-        wishlistButton.setBackground(ThemeColors.SECONDARY);
-        wishlistButton.setForeground(Color.WHITE);
-        wishlistButton.setBorder(BorderFactory.createEmptyBorder(5, 15, 5, 15));
-        wishlistButton.addActionListener(e -> {
-            loadWishlist();
-            showCard("Wishlist");
-        });
         userPanel.add(wishlistButton);
-
-        JButton ordersButton = new JButton("ORDERS");
-        ordersButton.setFont(new Font("Arial", Font.BOLD, 12));
-        ordersButton.setBackground(ThemeColors.SECONDARY);
-        ordersButton.setForeground(Color.WHITE);
-        ordersButton.setBorder(BorderFactory.createEmptyBorder(5, 15, 5, 15));
-        ordersButton.addActionListener(e -> {
-            loadOrders();
-            showCard("Orders");
-        });
         userPanel.add(ordersButton);
-
-        JButton reviewButton = new JButton("REVIEWS");
-        reviewButton.setFont(new Font("Arial", Font.BOLD, 12));
-        reviewButton.setBackground(ThemeColors.CARD_BG);
-        reviewButton.setForeground(ThemeColors.TEXT);
-        reviewButton.setBorder(BorderFactory.createEmptyBorder(5, 15, 5, 15));
-        reviewButton.addActionListener(e -> new ProductReviewFrame(customerId));
         userPanel.add(reviewButton);
-
-        JButton logoutButton = new JButton("LOGOUT");
-        logoutButton.setFont(new Font("Arial", Font.BOLD, 12));
-        logoutButton.setBackground(ThemeColors.CARD_BG);
-        logoutButton.setForeground(ThemeColors.TEXT);
-        logoutButton.setBorder(BorderFactory.createEmptyBorder(5, 15, 5, 15));
-        logoutButton.addActionListener(e -> logout());
         userPanel.add(logoutButton);
 
         navBar.add(userPanel, BorderLayout.EAST);
 
+        // Add action listeners
+        shopButton.addActionListener(e -> showCard("Home"));
+        eventButton.addActionListener(e -> showCard("Events"));
+        faqButton.addActionListener(e -> showCard("FAQ"));
+        noticeButton.addActionListener(e -> showCard("Notices"));
+        aboutButton.addActionListener(e -> showCard("About"));
+
+        cartButton.addActionListener(e -> {
+            loadCartItems();
+            showCard("Cart");
+        });
+
+        wishlistButton.addActionListener(e -> {
+            loadWishlist();
+            showCard("Wishlist");
+        });
+
+        ordersButton.addActionListener(e -> {
+            loadOrders();
+            showCard("Orders");
+        });
+
+        reviewButton.addActionListener(e -> new ProductReviewFrame(customerId));
+        logoutButton.addActionListener(e -> logout());
+
         return navBar;
+    }
+    
+    private JButton createUserButton(String text) {
+        JButton button = new JButton(text);
+        button.setFont(new Font("Arial", Font.BOLD, 12));
+        button.setBackground(ThemeColors.CARD_BG);
+        button.setForeground(ThemeColors.TEXT);
+        button.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(ThemeColors.SECONDARY, 1),
+            BorderFactory.createEmptyBorder(5, 15, 5, 15)
+        ));
+        button.setFocusPainted(false);
+        button.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseEntered(MouseEvent e) {
+                button.setBackground(ThemeColors.SECONDARY);
+                button.setForeground(Color.WHITE);
+            }
+            @Override
+            public void mouseExited(MouseEvent e) {
+                button.setBackground(ThemeColors.CARD_BG);
+                button.setForeground(ThemeColors.TEXT);
+            }
+        });
+        return button;
+    }
+    
+    // New method to create buttons with counter badges in the upper right
+    private JButton createBadgeButtonWithCounter(String text, int count) {
+        JButton button = new JButton(text) {
+            @Override
+            protected void paintComponent(Graphics g) {
+                super.paintComponent(g);
+
+                if (count > 0) {
+                    Graphics2D g2 = (Graphics2D) g.create();
+                    g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+
+                    // Badge dimensions and position
+                    int diameter = 18;
+                    int x = getWidth() - diameter - 1;  // Position from right edge
+                    int y = -diameter/3;  // Partially above the button
+
+                    // Draw badge background
+                    g2.setColor(ThemeColors.PRIMARY);
+                    g2.fillOval(x, y, diameter, diameter);
+
+                    // Draw badge text
+                    String countText = count > 99 ? "99+" : String.valueOf(count);
+                    g2.setColor(Color.WHITE);
+                    g2.setFont(getFont().deriveFont(Font.BOLD, 10f));
+                    FontMetrics fm = g2.getFontMetrics();
+                    int textWidth = fm.stringWidth(countText);
+                    int textHeight = fm.getHeight();
+                    g2.drawString(countText, 
+                        x + (diameter - textWidth)/2, 
+                        y + (diameter - textHeight)/2 + fm.getAscent());
+
+                    g2.dispose();
+                }
+            }
+
+            @Override
+            public Dimension getPreferredSize() {
+                Dimension size = super.getPreferredSize();
+                // Add extra space to prevent text clipping
+                return new Dimension(size.width + 5, size.height);
+            }
+        };
+
+        // Standard button styling
+        button.setFont(new Font("Arial", Font.BOLD, 12));
+        button.setBackground(ThemeColors.CARD_BG);
+        button.setForeground(ThemeColors.TEXT);
+        button.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(ThemeColors.SECONDARY, 1),
+            BorderFactory.createEmptyBorder(5, 15, 5, 15)
+        ));
+        button.setFocusPainted(false);
+
+        // Hover effects
+        button.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseEntered(MouseEvent e) {
+                button.setBackground(ThemeColors.SECONDARY);
+                button.setForeground(Color.WHITE);
+            }
+
+            @Override
+            public void mouseExited(MouseEvent e) {
+                button.setBackground(ThemeColors.CARD_BG);
+                button.setForeground(ThemeColors.TEXT);
+            }
+        });
+
+        return button;
     }
 
     private JButton createNavButton(String text) {
@@ -225,6 +313,43 @@ public class CustomerFrame extends JFrame {
             }
         });
         return button;
+    }
+    
+    // Methods to get item counts from database
+    private int getCartItemCount() {
+        try (Connection conn = DBConnection.connect();
+             PreparedStatement stmt = conn.prepareStatement(
+                 "SELECT SUM(quantity) FROM cart WHERE customer_id = ?")) {
+            stmt.setInt(1, customerId);
+            ResultSet rs = stmt.executeQuery();
+            return rs.next() ? rs.getInt(1) : 0;
+        } catch (SQLException ex) {
+            return 0;
+        }
+    }
+
+    private int getWishlistItemCount() {
+        try (Connection conn = DBConnection.connect();
+             PreparedStatement stmt = conn.prepareStatement(
+                 "SELECT COUNT(*) FROM wishlist WHERE customer_id = ?")) {
+            stmt.setInt(1, customerId);
+            ResultSet rs = stmt.executeQuery();
+            return rs.next() ? rs.getInt(1) : 0;
+        } catch (SQLException ex) {
+            return 0;
+        }
+    }
+
+    private int getOrderCount() {
+        try (Connection conn = DBConnection.connect();
+             PreparedStatement stmt = conn.prepareStatement(
+                 "SELECT COUNT(*) FROM orders WHERE customer_id = ?")) {
+            stmt.setInt(1, customerId);
+            ResultSet rs = stmt.executeQuery();
+            return rs.next() ? rs.getInt(1) : 0;
+        } catch (SQLException ex) {
+            return 0;
+        }
     }
 
     private JPanel createHomePanel() {
@@ -1993,31 +2118,6 @@ public class CustomerFrame extends JFrame {
         });
         return button;
     }
-
-        // Add this test method to your CustomerFrame class
-    private void testDatabasePersistence() {
-        try (Connection conn = DBConnection.connect();
-             Statement stmt = conn.createStatement()) {
-
-            // Test insert
-            stmt.executeUpdate("INSERT INTO cart (product_id, product_name, price, quantity, customer_id) " +
-                             "VALUES (1, 'Test Product', 10.99, 1, " + customerId + ")");
-
-            // Verify insert
-            ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM cart WHERE customer_id = " + customerId);
-            rs.next();
-            int count = rs.getInt(1);
-            JOptionPane.showMessageDialog(this, "Test record count: " + count);
-
-            // Cleanup
-            stmt.executeUpdate("DELETE FROM cart WHERE product_name = 'Test Product'");
-
-        } catch (SQLException ex) {
-            JOptionPane.showMessageDialog(this, 
-                "Database test failed: " + ex.getMessage(),
-                "Error", JOptionPane.ERROR_MESSAGE);
-        }
-    }
     
     private void addToCart(int productId, String name, double price) {
         String sql = "INSERT INTO cart (product_id, product_name, price, quantity, customer_id) " +
@@ -2052,20 +2152,6 @@ public class CustomerFrame extends JFrame {
         }
     }
 
-    // Helper method for debugging
-    private void debugPrintCartContents(Connection conn) throws SQLException {
-        System.out.println("Current Cart Contents:");
-        String sql = "SELECT c.id, p.name, c.quantity FROM cart c JOIN products p ON c.product_id = p.id WHERE c.customer_id = ?";
-        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setInt(1, customerId);
-            ResultSet rs = stmt.executeQuery();
-            while (rs.next()) {
-                System.out.printf("Cart ID: %d, Product: %s, Qty: %d%n", 
-                    rs.getInt("id"), rs.getString("name"), rs.getInt("quantity"));
-            }
-        }
-    }
-
     private void addToWishlist(int productId, String name, double price) {
         String sql = "INSERT INTO wishlist (customer_id, product_id) VALUES (?, ?)";
 
@@ -2095,123 +2181,6 @@ public class CustomerFrame extends JFrame {
         }
     }
     
-    private JPanel createWishlistProductCard(String name, String category, double price, int id, String description) {
-        JPanel card = new JPanel(new BorderLayout());
-        card.setBackground(ThemeColors.CARD_BG);
-        card.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
-        card.setPreferredSize(new Dimension(250, 350));
-        card.putClientProperty("productId", id);
-        card.putClientProperty("productName", name);
-        card.putClientProperty("price", price);
-
-        // Image container
-        JPanel imageContainer = new JPanel(new BorderLayout());
-        imageContainer.setPreferredSize(new Dimension(230, 230));
-        imageContainer.setBackground(ThemeColors.BACKGROUND);
-
-        try {
-            ImageIcon originalIcon = null;
-            String[] possiblePaths = {
-                "src/images/products/" + name.replaceAll("\\s+", "_").toLowerCase() + ".png",
-                "images/products/" + name.replaceAll("\\s+", "_").toLowerCase() + ".png",
-                "resources/images/products/" + name.replaceAll("\\s+", "_").toLowerCase() + ".png"
-            };
-
-            for (String path : possiblePaths) {
-                File imageFile = new File(path);
-                if (imageFile.exists()) {
-                    originalIcon = new ImageIcon(path);
-                    break;
-                }
-            }
-
-            if (originalIcon == null) {
-                URL imageUrl = getClass().getResource("/images/products/" + name.replaceAll("\\s+", "_").toLowerCase() + ".png");
-                if (imageUrl != null) {
-                    originalIcon = new ImageIcon(imageUrl);
-                }
-            }
-
-            if (originalIcon != null) {
-                Image scaledImage = originalIcon.getImage().getScaledInstance(230, 230, Image.SCALE_SMOOTH);
-                JLabel imageLabel = new JLabel(new ImageIcon(scaledImage));
-                imageContainer.add(imageLabel, BorderLayout.CENTER);
-            } else {
-                JLabel noImageLabel = new JLabel("No Image Available", SwingConstants.CENTER);
-                noImageLabel.setFont(new Font("Arial", Font.ITALIC, 12));
-                noImageLabel.setForeground(Color.GRAY);
-                imageContainer.add(noImageLabel, BorderLayout.CENTER);
-            }
-        } catch (Exception e) {
-            JLabel errorLabel = new JLabel("Image Error", SwingConstants.CENTER);
-            errorLabel.setForeground(Color.RED);
-            imageContainer.add(errorLabel, BorderLayout.CENTER);
-        }
-
-        card.add(imageContainer, BorderLayout.CENTER);
-
-        // Product info panel
-        JPanel infoPanel = new JPanel(new BorderLayout());
-        infoPanel.setOpaque(false);
-        infoPanel.setBorder(BorderFactory.createEmptyBorder(10, 0, 0, 0));
-
-        // Top panel for checkbox and name
-        JPanel topPanel = new JPanel(new BorderLayout());
-        topPanel.setOpaque(false);
-
-        // Selection checkbox
-        JCheckBox selectCheckbox = new JCheckBox();
-        selectCheckbox.setOpaque(false);
-        selectCheckbox.setPreferredSize(new Dimension(20, 20));
-        topPanel.add(selectCheckbox, BorderLayout.WEST);
-
-        // Product name
-        JLabel nameLabel = new JLabel(name);
-        nameLabel.setFont(new Font("Arial", Font.BOLD, 14));
-        nameLabel.setForeground(ThemeColors.TEXT);
-        topPanel.add(nameLabel, BorderLayout.CENTER);
-
-        infoPanel.add(topPanel, BorderLayout.NORTH);
-
-        // Price label
-        JLabel priceLabel = new JLabel(String.format("₱%.2f", price));
-        priceLabel.setFont(new Font("Arial", Font.BOLD, 16));
-        priceLabel.setForeground(ThemeColors.PRIMARY);
-        infoPanel.add(priceLabel, BorderLayout.CENTER);
-
-        // Button panel
-        JPanel buttonPanel = new JPanel(new GridLayout(1, 3, 5, 0));
-        buttonPanel.setOpaque(false);
-        buttonPanel.setBorder(BorderFactory.createEmptyBorder(10, 0, 0, 0));
-
-        JButton detailsButton = createStyledButton("Details", ThemeColors.SECONDARY);
-        detailsButton.setFont(new Font("Arial", Font.BOLD, 12));
-        detailsButton.addActionListener(e -> showProductDetails(id, name, price, description));
-
-        JButton removeButton = createStyledButton("Remove", new Color(200, 0, 0));
-        removeButton.setFont(new Font("Arial", Font.BOLD, 12));
-        removeButton.addActionListener(e -> {
-            removeFromWishlist(id);
-            loadWishlist();
-        });
-
-        JButton moveToCartButton = createStyledButton("Cart", ThemeColors.PRIMARY);
-        moveToCartButton.setFont(new Font("Arial", Font.BOLD, 12));
-        moveToCartButton.addActionListener(e -> {
-            addToCart(id, name, price);
-            JOptionPane.showMessageDialog(this, "Product added to cart!");
-        });
-
-        buttonPanel.add(detailsButton);
-        buttonPanel.add(removeButton);
-        buttonPanel.add(moveToCartButton);
-
-        infoPanel.add(buttonPanel, BorderLayout.SOUTH);
-        card.add(infoPanel, BorderLayout.SOUTH);
-
-        return card;
-    }
-    
     private void removeFromWishlist(int productId) {
         try (Connection conn = DBConnection.connect();
              PreparedStatement stmt = conn.prepareStatement(
@@ -2227,104 +2196,6 @@ public class CustomerFrame extends JFrame {
                 "Error removing item from wishlist",
                 "Error", JOptionPane.ERROR_MESSAGE);
         }
-    }
-
-
-    private void moveToCartFromWishlist() {
-        // Find the wishlist items panel
-        JPanel wishlistItemsPanel = null;
-        for (Component comp : wishlistPanel.getComponents()) {
-            if (comp instanceof JScrollPane) {
-                JScrollPane scrollPane = (JScrollPane) comp;
-                wishlistItemsPanel = (JPanel) scrollPane.getViewport().getView();
-                break;
-            }
-        }
-
-        if (wishlistItemsPanel == null) return;
-
-        // Find the selected product
-        Component[] components = wishlistItemsPanel.getComponents();
-        for (Component comp : components) {
-            if (comp instanceof JPanel) {
-                JPanel itemPanel = (JPanel) comp;
-                Component[] itemComponents = itemPanel.getComponents();
-                if (itemComponents.length > 0 && itemComponents[0] instanceof JPanel) {
-                    JPanel contentPanel = (JPanel) itemComponents[0];
-                    Component[] contentComponents = contentPanel.getComponents();
-                    if (contentComponents.length >= 3 && contentComponents[2] instanceof JPanel) {
-                        JPanel rightPanel = (JPanel) contentComponents[2];
-                        for (Component rightComp : rightPanel.getComponents()) {
-                            if (rightComp instanceof JCheckBox) {
-                                JCheckBox checkbox = (JCheckBox) rightComp;
-                                if (checkbox.isSelected()) {
-                                    int productId = (int) checkbox.getClientProperty("productId");
-                                    String productName = (String) checkbox.getClientProperty("name");
-                                    double price = (double) checkbox.getClientProperty("price");
-
-                                    try (Connection conn = DBConnection.connect()) {
-                                        conn.setAutoCommit(false); // Start transaction
-
-                                        try {
-                                            // 1. Remove from wishlist
-                                            String deleteSql = "DELETE FROM wishlist WHERE customer_id = ? AND product_id = ?";
-                                            try (PreparedStatement deleteStmt = conn.prepareStatement(deleteSql)) {
-                                                deleteStmt.setInt(1, customerId);
-                                                deleteStmt.setInt(2, productId);
-                                                int deleted = deleteStmt.executeUpdate();
-                                                if (deleted == 0) throw new SQLException("Failed to remove from wishlist");
-                                            }
-
-                                            // 2. Add to cart (or update quantity if exists)
-                                            String cartSql = "INSERT INTO cart (product_id, product_name, price, quantity, customer_id) " +
-                                                           "VALUES (?, ?, ?, 1, ?) " +
-                                                           "ON DUPLICATE KEY UPDATE quantity = quantity + 1";
-                                            try (PreparedStatement cartStmt = conn.prepareStatement(cartSql)) {
-                                                cartStmt.setInt(1, productId);
-                                                cartStmt.setString(2, productName);
-                                                cartStmt.setDouble(3, price);
-                                                cartStmt.setInt(4, customerId);
-                                                int added = cartStmt.executeUpdate();
-                                                if (added == 0) throw new SQLException("Failed to add to cart");
-                                            }
-
-                                            conn.commit(); // Commit transaction
-
-                                            // 3. Update both UIs
-                                            wishlistItemsPanel.remove(itemPanel);
-                                            wishlistItemsPanel.revalidate();
-                                            wishlistItemsPanel.repaint();
-                                            loadCartItems();
-
-                                            JOptionPane.showMessageDialog(this, 
-                                                "Product moved to cart successfully!", 
-                                                "Success", JOptionPane.INFORMATION_MESSAGE);
-                                            return; // Exit after successful move
-
-                                        } catch (SQLException ex) {
-                                            conn.rollback(); // Rollback on error
-                                            System.err.println("Transaction failed: " + ex.getMessage());
-                                            JOptionPane.showMessageDialog(this,
-                                                "Error moving product: " + ex.getMessage(),
-                                                "Error", JOptionPane.ERROR_MESSAGE);
-                                        }
-                                    } catch (SQLException ex) {
-                                        System.err.println("Database error: " + ex.getMessage());
-                                        JOptionPane.showMessageDialog(this,
-                                            "Database connection error",
-                                            "Error", JOptionPane.ERROR_MESSAGE);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        JOptionPane.showMessageDialog(this, 
-            "Please select a product to move", 
-            "Error", JOptionPane.ERROR_MESSAGE);
     }
 
     private void loadCartItems() {
@@ -2457,7 +2328,7 @@ public class CustomerFrame extends JFrame {
         ordersPanel.revalidate();
         ordersPanel.repaint();
     }
-    
+        
     private void checkout() {
         List<Integer> selectedCartIds = new ArrayList<>();
         double totalAmount = 0.0;
@@ -2466,15 +2337,11 @@ public class CustomerFrame extends JFrame {
         for (Component comp : cartItemsPanel.getComponents()) {
             if (comp instanceof JPanel) {
                 JPanel itemPanel = (JPanel) comp;
-                // Get the cart ID stored in the panel's client property
                 Integer cartId = (Integer) itemPanel.getClientProperty("cartId");
-
-                // Find the checkbox in this panel
                 JCheckBox checkbox = findCheckboxInPanel(itemPanel);
 
                 if (checkbox != null && checkbox.isSelected() && cartId != null) {
                     selectedCartIds.add(cartId);
-
                     double price = (double) checkbox.getClientProperty("price");
                     int quantity = (int) checkbox.getClientProperty("quantity");
                     totalAmount += price * quantity;
@@ -2489,8 +2356,17 @@ public class CustomerFrame extends JFrame {
             return;
         }
 
-        // Only proceed with selected items
-        new PaymentFrame(customerId, selectedCartIds);
+        // Show address selection dialog
+        AddressManager.Address selectedAddress = addressManager.showAddressSelection();
+        if (selectedAddress == null) {
+            JOptionPane.showMessageDialog(this,
+                "Please select or add a delivery address",
+                "Address Required", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+
+        // Proceed with payment using the selected address
+        new PaymentFrame(customerId, selectedCartIds, selectedAddress);
         dispose();
     }
     

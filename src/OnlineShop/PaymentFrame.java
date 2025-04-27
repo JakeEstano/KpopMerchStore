@@ -8,10 +8,12 @@ import com.formdev.flatlaf.FlatDarkLaf;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Collections;
+import OnlineShop.AddressManager.Address;
 
 public class PaymentFrame extends JFrame {
     private int customerId;
     private List<Integer> cartIds;
+    private Address address;
     private JTextField cardNumberField, cvvField, expiryField;
     private JTextField accountNameField, accountNumberField;
     private JPasswordField accountPasswordField;
@@ -19,9 +21,10 @@ public class PaymentFrame extends JFrame {
     private JComboBox<String> paymentMethodBox;
     private JPanel fieldsPanel;
 
-    public PaymentFrame(int customerId, List<Integer> cartIds) {
+    public PaymentFrame(int customerId, List<Integer> cartIds, Address address) {
         this.customerId = customerId;
         this.cartIds = cartIds;
+        this.address = address;
         setTitle("HAMTEO - Payment");
         setSize(600, 500);
         setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
@@ -81,6 +84,11 @@ public class PaymentFrame extends JFrame {
         setLocationRelativeTo(null);
         setVisible(true);
     }
+    
+    public PaymentFrame(int customerId, List<Integer> cartIds) {
+        this(customerId, cartIds, null); // Call main constructor with null address
+    }
+    
 
     private void createCardFields() {
         // Card number
@@ -397,6 +405,8 @@ public class PaymentFrame extends JFrame {
         } catch (Exception ex) {
             ex.printStackTrace();
         }
-        new PaymentFrame(1, new ArrayList<>()); // Pass empty list for testing
+
+        // Option 1: Use the simpler constructor (for testing)
+        new PaymentFrame(1, new ArrayList<>());
     }
 }

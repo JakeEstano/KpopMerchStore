@@ -86,7 +86,6 @@ public class AdminFrame extends JFrame {
         JPanel productsPanel = createProductsPanel();
         JPanel inventoryPanel = createInventoryPanel();
         JPanel salesPanel = createSalesPanel();
-        JPanel suppliersPanel = createSuppliersPanel();
         JPanel ordersPanel = createOrdersPanel();
 
         // Add panels to mainPanel
@@ -95,7 +94,6 @@ public class AdminFrame extends JFrame {
         mainPanel.add(productsPanel, "Products");
         mainPanel.add(inventoryPanel, "Inventory");
         mainPanel.add(salesPanel, "Sales");
-        mainPanel.add(suppliersPanel, "Suppliers");
         mainPanel.add(ordersPanel, "Orders");
 
         add(mainPanel, BorderLayout.CENTER);
@@ -127,7 +125,7 @@ public class AdminFrame extends JFrame {
         navButtons.setOpaque(false);
         navButtons.setBorder(BorderFactory.createEmptyBorder(15, 0, 15, 0));
 
-        String[] navItems = {"Dashboard", "Users", "Products", "Inventory", "Sales", "Suppliers", "Orders"};
+        String[] navItems = {"Dashboard", "Users", "Products", "Inventory", "Sales", "Orders"};
 
         for (String item : navItems) {
             JButton btn = createNavButton(item);
@@ -216,12 +214,6 @@ public class AdminFrame extends JFrame {
                 button.addActionListener(e -> {
                     loadSales();
                     cardLayout.show(mainPanel, "Sales");
-                });
-                break;
-            case "Suppliers":
-                button.addActionListener(e -> {
-                    loadSuppliers();
-                    cardLayout.show(mainPanel, "Suppliers");
                 });
                 break;
             case "Orders":
@@ -548,31 +540,7 @@ public class AdminFrame extends JFrame {
         panel.add(filterPanel, BorderLayout.NORTH);
         panel.add(new JScrollPane(salesTable), BorderLayout.CENTER);
         return panel;
-    }
-
-    private JPanel createSuppliersPanel() {
-        JPanel panel = createTablePanel("Supplier Management");
-        supplierTableModel = new DefaultTableModel(new String[]{"ID", "Name", "Contact", "Products Supplied"}, 0);
-        supplierTable = new JTable(supplierTableModel);
-        styleTable(supplierTable);
-        
-        // Add buttons for supplier management
-        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
-        buttonPanel.setOpaque(false);
-        
-        JButton addSupplierButton = new JButton("Add Supplier");
-        addSupplierButton.addActionListener(e -> addSupplier());
-        
-        JButton editSupplierButton = new JButton("Edit Supplier");
-        editSupplierButton.addActionListener(e -> editSupplier());
-        
-        buttonPanel.add(addSupplierButton);
-        buttonPanel.add(editSupplierButton);
-        
-        panel.add(buttonPanel, BorderLayout.SOUTH);
-        panel.add(new JScrollPane(supplierTable), BorderLayout.CENTER);
-        return panel;
-    }
+    }   
 
     private JPanel createOrdersPanel() {
         JPanel panel = createTablePanel("Order Management");
@@ -778,29 +746,6 @@ public class AdminFrame extends JFrame {
         } catch (SQLException ex) {
             ex.printStackTrace();
             JOptionPane.showMessageDialog(this, "Error loading sales.", "Error", JOptionPane.ERROR_MESSAGE);
-        }
-    }
-
-    private void loadSuppliers() {
-        try (Connection conn = DBConnection.connect();
-             Statement stmt = conn.createStatement();
-             ResultSet rs = stmt.executeQuery(
-                 "SELECT s.id, s.name, s.contact, GROUP_CONCAT(p.name SEPARATOR ', ') as products " +
-                 "FROM suppliers s " +
-                 "LEFT JOIN products p ON s.id = p.supplier_id " +
-                 "GROUP BY s.id")) {
-            supplierTableModel.setRowCount(0);
-            while (rs.next()) {
-                supplierTableModel.addRow(new Object[]{
-                    rs.getInt("id"), 
-                    rs.getString("name"), 
-                    rs.getString("contact"),
-                    rs.getString("products") != null ? rs.getString("products") : "None"
-                });
-            }
-        } catch (SQLException ex) {
-            ex.printStackTrace();
-            JOptionPane.showMessageDialog(this, "Error loading suppliers.", "Error", JOptionPane.ERROR_MESSAGE);
         }
     }
 
@@ -1242,8 +1187,6 @@ public class AdminFrame extends JFrame {
         fieldsPanel.add(groupNameField);
         fieldsPanel.add(createFormLabel("Description:"));
         fieldsPanel.add(descriptionScroll);
-        fieldsPanel.add(createFormLabel("Supplier ID:"));
-        fieldsPanel.add(supplierField);
         fieldsPanel.add(createFormLabel("Product Image:"));
         fieldsPanel.add(browseButton);
         fieldsPanel.add(createFormLabel("Selected Image:"));
@@ -1305,14 +1248,14 @@ public class AdminFrame extends JFrame {
                     imagePath = "images/products/" + newFileName;
                 }
 
-                if (saveNewProduct(name, price, stock, groupName, description, supplierId, imagePath)) {
+                if (saveNewProduct(name, price, stock, groupName, description, imagePath)) {
                     loadProducts();
                     dialog.dispose();
                     JOptionPane.showMessageDialog(this, "Product added successfully!");
                 }
             } catch (NumberFormatException ex) {
                 JOptionPane.showMessageDialog(this, 
-                    "Please enter valid numbers for price, stock, and supplier ID", 
+                    "Please enter valid numbers for price and stock", 
                     "Error", JOptionPane.ERROR_MESSAGE);
             } catch (IOException ex) {
                 ex.printStackTrace();
@@ -1332,46 +1275,72 @@ public class AdminFrame extends JFrame {
     }
 
     private boolean saveNewProduct(String name, double price, int stock, 
-                                    String groupName, String description, int supplierId, String imagePath) {
-            try (Connection conn = DBConnection.connect()) {
-                // Check if image_path column exists
-                boolean hasImageColumn = false;
-                try (ResultSet columns = conn.getMetaData().getColumns(null, null, "products", "image_path")) {
-                    hasImageColumn = columns.next();
-                }
+                                    String groupName, String description, String imagePath) {
+           Connection conn = null;
+           try {
+               conn = DBConnection.connect();
+               conn.setAutoCommit(false); // Start transaction
 
-                String sql;
-                if (hasImageColumn) {
-                    sql = "INSERT INTO products (name, price, stock, group_name, description, supplier_id, image_path) " +
-                          "VALUES (?, ?, ?, ?, ?, ?, ?)";
-                } else {
-                    sql = "INSERT INTO products (name, price, stock, group_name, description, supplier_id) " +
-                          "VALUES (?, ?, ?, ?, ?, ?)";
-                }
+               // Check for image column
+               boolean hasImageColumn = false;
+               try (ResultSet columns = conn.getMetaData().getColumns(null, null, "products", "image_path")) {
+                   hasImageColumn = columns.next();
+               }
 
-                try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-                    stmt.setString(1, name);
-                    stmt.setDouble(2, price);
-                    stmt.setInt(3, stock);
-                    stmt.setString(4, groupName);
-                    stmt.setString(5, description);
-                    stmt.setInt(6, supplierId);
+               String sql;
+               if (hasImageColumn) {
+                   sql = "INSERT INTO products (name, price, stock, group_name, description, image_path) " +
+                        "VALUES (?, ?, ?, ?, ?, ?)";
+               } else {
+                   sql = "INSERT INTO products (name, price, stock, group_name, description) " +
+                        "VALUES (?, ?, ?, ?, ?)";
+               }
 
-                    if (hasImageColumn) {
-                        stmt.setString(7, imagePath);
-                    }
+               try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+                   stmt.setString(1, name);
+                   stmt.setDouble(2, price);
+                   stmt.setInt(3, stock);
+                   stmt.setString(4, groupName);
+                   stmt.setString(5, description);
 
-                    int rowsAffected = stmt.executeUpdate();
-                    return rowsAffected > 0;
-                }
-            } catch (SQLException ex) {
-                ex.printStackTrace();
-                JOptionPane.showMessageDialog(this, 
-                    "Error adding product: " + ex.getMessage(), 
-                    "Error", JOptionPane.ERROR_MESSAGE);
-                return false;
-            }
-        }
+                   if (hasImageColumn) {
+                       stmt.setString(6, imagePath != null ? imagePath : "");
+                   }
+
+                   int rowsAffected = stmt.executeUpdate();
+
+                   if (rowsAffected > 0) {
+                       conn.commit(); // Commit transaction
+                       return true;
+                   } else {
+                       conn.rollback(); // Rollback if no rows affected
+                       return false;
+                   }
+               }
+           } catch (SQLException ex) {
+               if (conn != null) {
+                   try {
+                       conn.rollback(); // Rollback on error
+                   } catch (SQLException e) {
+                       e.printStackTrace();
+                   }
+               }
+               ex.printStackTrace();
+               JOptionPane.showMessageDialog(this, 
+                   "Error adding product: " + ex.getMessage(), 
+                   "Error", JOptionPane.ERROR_MESSAGE);
+               return false;
+           } finally {
+               if (conn != null) {
+                   try {
+                       conn.setAutoCommit(true); // Reset auto-commit
+                       conn.close();
+                   } catch (SQLException e) {
+                       e.printStackTrace();
+                   }
+               }
+           }
+       }
 
     private void editProduct() {
         int selectedRow = productTable.getSelectedRow();
@@ -1786,133 +1755,6 @@ public class AdminFrame extends JFrame {
             ex.printStackTrace();
             JOptionPane.showMessageDialog(this, 
                 "Error updating user: " + ex.getMessage(), 
-                "Error", JOptionPane.ERROR_MESSAGE);
-            return false;
-        }
-    }
-
-    private void addSupplier() {
-        JDialog dialog = new JDialog(this, "Add New Supplier", true);
-        dialog.setLayout(new BorderLayout());
-        dialog.getContentPane().setBackground(ThemeColors.BACKGROUND);
-        dialog.setSize(400, 300);
-
-        JPanel formPanel = new JPanel(new GridLayout(4, 2, 10, 10));
-        formPanel.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
-        formPanel.setBackground(ThemeColors.BACKGROUND);
-
-        JTextField nameField = new JTextField();
-        JTextField contactField = new JTextField();
-        JTextField addressField = new JTextField();
-
-        formPanel.add(new JLabel("Supplier Name:"));
-        formPanel.add(nameField);
-        formPanel.add(new JLabel("Contact:"));
-        formPanel.add(contactField);
-        formPanel.add(new JLabel("Address:"));
-        formPanel.add(addressField);
-
-        JButton saveButton = new JButton("Save");
-        saveButton.addActionListener(e -> {
-            String name = nameField.getText();
-            String contact = contactField.getText();
-            String address = addressField.getText();
-
-            if (saveNewSupplier(name, contact, address)) {
-                loadSuppliers();
-                dialog.dispose();
-                JOptionPane.showMessageDialog(this, "Supplier added successfully!");
-            }
-        });
-
-        dialog.add(formPanel, BorderLayout.CENTER);
-        dialog.add(saveButton, BorderLayout.SOUTH);
-        dialog.setLocationRelativeTo(this);
-        dialog.setVisible(true);
-    }
-
-    private boolean saveNewSupplier(String name, String contact, String address) {
-        try (Connection conn = DBConnection.connect();
-             PreparedStatement stmt = conn.prepareStatement(
-                 "INSERT INTO suppliers (name, contact, address) VALUES (?, ?, ?)")) {
-            
-            stmt.setString(1, name);
-            stmt.setString(2, contact);
-            stmt.setString(3, address);
-            
-            int rowsAffected = stmt.executeUpdate();
-            return rowsAffected > 0;
-        } catch (SQLException ex) {
-            ex.printStackTrace();
-            JOptionPane.showMessageDialog(this, 
-                "Error adding supplier: " + ex.getMessage(), 
-                "Error", JOptionPane.ERROR_MESSAGE);
-            return false;
-        }
-    }
-
-    private void editSupplier() {
-        int selectedRow = supplierTable.getSelectedRow();
-        if (selectedRow < 0) {
-            JOptionPane.showMessageDialog(this, "Please select a supplier first", "Error", JOptionPane.ERROR_MESSAGE);
-            return;
-        }
-
-        int supplierId = (int) supplierTableModel.getValueAt(selectedRow, 0);
-        String currentName = (String) supplierTableModel.getValueAt(selectedRow, 1);
-        String currentContact = (String) supplierTableModel.getValueAt(selectedRow, 2);
-
-        JDialog dialog = new JDialog(this, "Edit Supplier", true);
-        dialog.setLayout(new BorderLayout());
-        dialog.getContentPane().setBackground(ThemeColors.BACKGROUND);
-        dialog.setSize(400, 300);
-
-        JPanel formPanel = new JPanel(new GridLayout(3, 2, 10, 10));
-        formPanel.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
-        formPanel.setBackground(ThemeColors.BACKGROUND);
-
-        JTextField nameField = new JTextField(currentName);
-        JTextField contactField = new JTextField(currentContact);
-
-        formPanel.add(new JLabel("Supplier Name:"));
-        formPanel.add(nameField);
-        formPanel.add(new JLabel("Contact:"));
-        formPanel.add(contactField);
-
-        JButton saveButton = new JButton("Save");
-        saveButton.addActionListener(e -> {
-            String name = nameField.getText();
-            String contact = contactField.getText();
-
-            if (updateSupplier(supplierId, name, contact)) {
-                supplierTableModel.setValueAt(name, selectedRow, 1);
-                supplierTableModel.setValueAt(contact, selectedRow, 2);
-                dialog.dispose();
-                JOptionPane.showMessageDialog(this, "Supplier updated successfully!");
-            }
-        });
-
-        dialog.add(formPanel, BorderLayout.CENTER);
-        dialog.add(saveButton, BorderLayout.SOUTH);
-        dialog.setLocationRelativeTo(this);
-        dialog.setVisible(true);
-    }
-
-    private boolean updateSupplier(int supplierId, String name, String contact) {
-        try (Connection conn = DBConnection.connect();
-             PreparedStatement stmt = conn.prepareStatement(
-                 "UPDATE suppliers SET name = ?, contact = ? WHERE id = ?")) {
-            
-            stmt.setString(1, name);
-            stmt.setString(2, contact);
-            stmt.setInt(3, supplierId);
-            
-            int rowsAffected = stmt.executeUpdate();
-            return rowsAffected > 0;
-        } catch (SQLException ex) {
-            ex.printStackTrace();
-            JOptionPane.showMessageDialog(this, 
-                "Error updating supplier: " + ex.getMessage(), 
                 "Error", JOptionPane.ERROR_MESSAGE);
             return false;
         }
