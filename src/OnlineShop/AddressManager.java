@@ -1,5 +1,3 @@
-// --- START OF FILE AddressManager.java ---
-
 package OnlineShop;
 
 import javax.swing.*;
@@ -495,38 +493,79 @@ public class AddressManager {
             } return null;
         }
 
+        // UPDATED createAddressCard Method
         private JPanel createAddressCard(Address address) {
             JPanel cardPanel = new JPanel(new BorderLayout(10, 10));
             cardPanel.setBackground(ThemeColors.CARD_BG);
             Border line = new LineBorder(ThemeColors.SECONDARY);
             Border padding = new EmptyBorder(10, 10, 10, 10);
             cardPanel.setBorder(new CompoundBorder(line, padding));
-            cardPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 145)); // Height for two buttons
+            // Slightly adjusted height to better accommodate potentially smaller buttons
+            cardPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 135)); // Adjust if needed
 
             JRadioButton radio = new JRadioButton();
             styleRadioButton(radio);
-            JPanel radioWrapper = new JPanel(new GridBagLayout()); radioWrapper.setOpaque(false); radioWrapper.add(radio);
+            // Keep the radio button vertically centered if possible
+            JPanel radioWrapper = new JPanel(new GridBagLayout());
+            radioWrapper.setOpaque(false);
+            radioWrapper.add(radio);
             cardPanel.add(radioWrapper, BorderLayout.WEST);
 
-            JLabel addressLabel = new JLabel("<html><body style='width: 380px;'>" +
+            JLabel addressLabel = new JLabel("<html><body style='width: 380px;'>" + // Adjust width if needed
                 (address.isDefault() ? "<b style='color:" + colorToHex(ThemeColors.PRIMARY) + ";'>Default Address</b><br>" : "") +
-                 address.getFullAddressForDisplay() + "</body></html>");
-            addressLabel.setForeground(ThemeColors.TEXT); addressLabel.setVerticalAlignment(SwingConstants.TOP);
+                address.getFullAddressForDisplay() + "</body></html>");
+            addressLabel.setForeground(ThemeColors.TEXT);
+            addressLabel.setVerticalAlignment(SwingConstants.TOP);
             cardPanel.add(addressLabel, BorderLayout.CENTER);
 
-            JPanel buttonsPanel = new JPanel(); buttonsPanel.setLayout(new BoxLayout(buttonsPanel, BoxLayout.Y_AXIS)); buttonsPanel.setOpaque(false);
-            JButton editButton = createStyledButton("Edit", ThemeColors.SECONDARY); editButton.setBorder(new EmptyBorder(5, 15, 5, 15)); editButton.setAlignmentX(Component.CENTER_ALIGNMENT);
-            JButton deleteButton = createStyledButton("Delete", new Color(180, 40, 40)); deleteButton.setBorder(new EmptyBorder(5, 15, 5, 15)); deleteButton.setAlignmentX(Component.CENTER_ALIGNMENT);
+            JPanel buttonsPanel = new JPanel();
+            buttonsPanel.setLayout(new BoxLayout(buttonsPanel, BoxLayout.Y_AXIS));
+            buttonsPanel.setOpaque(false);
+            // buttonsPanel.setAlignmentY(Component.CENTER_ALIGNMENT); // Try centering the button panel itself
+
+            // Create buttons using the standard style first
+            JButton editButton = createStyledButton("Edit", ThemeColors.SECONDARY);
+            JButton deleteButton = createStyledButton("Delete", new Color(180, 40, 40)); // Keep distinct delete color
+
+            // --- START: Button Size Fix ---
+            // 1. Define a smaller border specifically for these buttons
+            Border smallButtonBorder = new EmptyBorder(5, 15, 5, 15); // Reduced padding
+            editButton.setBorder(smallButtonBorder);
+            deleteButton.setBorder(smallButtonBorder);
+
+            // 2. Calculate the preferred size based on the *wider* button to ensure they match
+            Dimension editPref = editButton.getPreferredSize();
+            Dimension deletePref = deleteButton.getPreferredSize();
+            int maxWidth = Math.max(editPref.width, deletePref.width);
+            // Use the calculated max width and a consistent height (e.g., edit button's height)
+            Dimension uniformSize = new Dimension(maxWidth, editPref.height);
+
+            // 3. Set Preferred and Maximum size to enforce uniformity and prevent stretching
+            editButton.setPreferredSize(uniformSize);
+            editButton.setMaximumSize(uniformSize); // Prevent BoxLayout from stretching it wider
+            deleteButton.setPreferredSize(uniformSize);
+            deleteButton.setMaximumSize(uniformSize); // Prevent BoxLayout from stretching it wider
+            // --- END: Button Size Fix ---
+
+            // Ensure buttons are centered within the buttonsPanel
+            editButton.setAlignmentX(Component.CENTER_ALIGNMENT);
+            deleteButton.setAlignmentX(Component.CENTER_ALIGNMENT);
 
             final Address addressRef = address; // Final reference for listeners
             editButton.addActionListener(e -> showEditAddressDialog(addressRef));
             deleteButton.addActionListener(e -> handleDeleteAddress(addressRef));
 
-            buttonsPanel.add(editButton); buttonsPanel.add(Box.createRigidArea(new Dimension(0, 5))); buttonsPanel.add(deleteButton);
+            buttonsPanel.add(Box.createVerticalGlue()); // Pushes buttons towards the center
+            buttonsPanel.add(editButton);
+            buttonsPanel.add(Box.createRigidArea(new Dimension(0, 5))); // Space between buttons
+            buttonsPanel.add(deleteButton);
+            buttonsPanel.add(Box.createVerticalGlue()); // Pushes buttons towards the center
+
             cardPanel.add(buttonsPanel, BorderLayout.EAST);
 
             return cardPanel;
         }
+
 
          private static class RadioButtonIcon implements Icon { /* ... as before ... */
              private final boolean selected; private static final int DIAMETER = 16;
@@ -778,6 +817,5 @@ public class AddressManager {
         private void styleScrollPane(JScrollPane sp) { sp.getVerticalScrollBar().setUnitIncrement(16); JScrollBar vsb = sp.getVerticalScrollBar(); vsb.setUI(new javax.swing.plaf.basic.BasicScrollBarUI() { @Override protected void configureScrollBarColors() { thumbColor = ThemeColors.PRIMARY; trackColor = ThemeColors.CARD_BG; } @Override protected JButton createDecreaseButton(int o) { return createZeroButton(); } @Override protected JButton createIncreaseButton(int o) { return createZeroButton(); } private JButton createZeroButton() { JButton b = new JButton(); Dimension z = new Dimension(0, 0); b.setPreferredSize(z); b.setMinimumSize(z); b.setMaximumSize(z); return b; } }); vsb.setBackground(ThemeColors.BACKGROUND); vsb.setBorder(null); }
         private void showThemedJOptionPane(String message, String title, int messageType) { UIManager.put("OptionPane.background", ThemeColors.DIALOG_BG); UIManager.put("Panel.background", ThemeColors.DIALOG_BG); UIManager.put("OptionPane.messageForeground", ThemeColors.DIALOG_FG); UIManager.put("Button.background", ThemeColors.SECONDARY); UIManager.put("Button.foreground", Color.WHITE); JOptionPane.showMessageDialog(this, message, title, messageType); }
 
-    } // End AddressSelectionDialog inner class
+    }
 }
-// --- END OF FILE AddressManager.java ---
