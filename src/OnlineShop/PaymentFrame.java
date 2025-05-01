@@ -284,15 +284,6 @@ public class PaymentFrame extends JFrame {
                     clearCartStmt.executeUpdate();
                 }
 
-                // 5. Update loyalty points (example: 1 point per $10 spent)
-                String updateLoyaltySQL = "UPDATE customers SET loyalty_points = loyalty_points + FLOOR(? / 10) WHERE id = ?";
-                try (PreparedStatement loyaltyStmt = conn.prepareStatement(updateLoyaltySQL)) {
-                    double orderTotal = calculateOrderTotal(conn);
-                    loyaltyStmt.setDouble(1, orderTotal);
-                    loyaltyStmt.setInt(2, customerId);
-                    loyaltyStmt.executeUpdate();
-                }
-
                 conn.commit(); // Commit transaction if all succeeds
 
                 // Show success message
