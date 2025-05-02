@@ -1,5 +1,10 @@
 package OnlineShop;
 
+// Keep existing imports
+import OnlineShop.AddressManager;
+import OnlineShop.LoginFrame;
+import OnlineShop.PaymentFrame;
+import OnlineShop.ProductReviewFrame;
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import java.awt.*;
@@ -31,9 +36,6 @@ import java.util.Arrays; // Import Arrays for List creation
 // --- THEME: Ensure the external ThemeColors is imported ---
 import OnlineShop.ThemeColors;
 import javax.swing.border.Border;
-
-// Assuming LoginFrame is in the same package or imported
-// import OnlineShop.LoginFrame;
 
 
 public class CustomerFrame extends JFrame {
@@ -85,19 +87,13 @@ public class CustomerFrame extends JFrame {
     public CustomerFrame(int customerId) {
         // Set window properties before making it displayable
         setTitle("케이팝 상점 - K-Pop Merch Store");
-        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE); // Keep EXIT if this is the main app window
         setLayout(new BorderLayout());
 
-        // Handle fullscreen/undecorated mode before any displayable operations
-        GraphicsEnvironment env = GraphicsEnvironment.getLocalGraphicsEnvironment();
-        GraphicsDevice device = env.getDefaultScreenDevice();
-
-        if (device.isFullScreenSupported()) {
-            setUndecorated(true);  // Must be called before frame is displayable
-            device.setFullScreenWindow(this);
-        } else {
-            setExtendedState(JFrame.MAXIMIZED_BOTH);
-        }
+        // --- START MODIFICATION: Full Screen and Undecorated ---
+        setUndecorated(true); // Remove window title bar and borders
+        setExtendedState(JFrame.MAXIMIZED_BOTH); // Maximize the frame
+        // --- END MODIFICATION ---
 
         // Initialize instance variables
         this.customerId = customerId;
@@ -208,8 +204,8 @@ public class CustomerFrame extends JFrame {
             updateNotificationBadge(); // Ensures initial badge count is displayed (based on unread)
         });
 
-        setLocationRelativeTo(null);
-        setVisible(true);
+        //setLocationRelativeTo(null); // No longer needed with MAXIMIZED_BOTH
+        setVisible(true); // Make visible AFTER setting undecorated and adding components
     }
 
     // --- createNavigationBar (Updated type hints for logout button) ---
@@ -1262,7 +1258,7 @@ public class CustomerFrame extends JFrame {
         }
     }
 
-    // Removed color/size display logic
+    // Removed color/size display logic and changed "Add to Cart" button to "Buy Now" with new functionality
     private JPanel createProductCard(int id, String name, String groupName, double price, String description, String imagePathFromDB) {
         JPanel card = new JPanel(new BorderLayout());
         card.setBackground(ThemeColors.CARD_BG);
@@ -1308,7 +1304,7 @@ public class CustomerFrame extends JFrame {
         infoPanel.add(nameLabel, BorderLayout.NORTH);
         infoPanel.add(priceLabel, BorderLayout.CENTER);
 
-        // Button Panel (Details, Add to Cart)
+        // Button Panel (Details, Buy Now)
         JPanel buttonPanel = new JPanel(new GridLayout(1, 2, 5, 0));
         buttonPanel.setOpaque(false);
         buttonPanel.setBorder(BorderFactory.createEmptyBorder(10, 0, 0, 0));
@@ -1317,19 +1313,148 @@ public class CustomerFrame extends JFrame {
         detailsButton.setFont(new Font("Arial", Font.BOLD, 12));
         detailsButton.addActionListener(e -> showProductDetails(id, name, price, description, imagePathFromDB));
 
-
-        JButton addToCartButton = createStyledButton("Add to Cart", ThemeColors.PRIMARY);
-        addToCartButton.setFont(new Font("Arial", Font.BOLD, 12));
-        addToCartButton.addActionListener(e -> addToCart(id, name, price));
+        // --- MODIFICATION: "Buy Now" button with direct checkout functionality ---
+        JButton buyNowButton = createStyledButton("Buy Now", ThemeColors.PRIMARY);
+        buyNowButton.setFont(new Font("Arial", Font.BOLD, 12));
+        buyNowButton.addActionListener(e -> buyNow(id, name, price)); // Call the new buyNow method
+        // --- END MODIFICATION ---
 
         buttonPanel.add(detailsButton);
-        buttonPanel.add(addToCartButton);
+        buttonPanel.add(buyNowButton); // Add the "Buy Now" button
 
         infoPanel.add(buttonPanel, BorderLayout.SOUTH);
         card.add(infoPanel, BorderLayout.SOUTH);
 
         return card;
     }
+
+
+    // --- NEW METHOD: Handle "Buy Now" button click ---
+    private void buyNow(int productId, String name, double price) {
+        String checkStockSql = "SELECT stock FROM products WHERE id = ?";
+        String insertCartSql = "INSERT INTO cart (product_id, product_name, price, quantity, customer_id) VALUES (?, ?, ?, 1, ?) ON DUPLICATE KEY UPDATE quantity = 1, id=LAST_INSERT_ID(id)"; // Ensure quantity is 1 and get ID
+        String updateStockSql = "UPDATE products SET stock = stock - 1 WHERE id = ? AND stock > 0";
+
+        Connection conn = null;
+        PreparedStatement checkStmt = null;
+        PreparedStatement insertStmt = null;
+        PreparedStatement updateStockStmt = null;
+        ResultSet generatedKeys = null;
+        int cartId = -1;
+
+        try {
+            conn = DBConnection.connect();
+            conn.setAutoCommit(false); // Start transaction
+
+            // 1. Check Stock
+            checkStmt = conn.prepareStatement(checkStockSql);
+            checkStmt.setInt(1, productId);
+            ResultSet rsStock = checkStmt.executeQuery();
+            int stock = 0;
+            if (rsStock.next()) {
+                stock = rsStock.getInt("stock");
+            } else {
+                JOptionPane.showMessageDialog(this, "Product '" + name + "' not found.", "Error", JOptionPane.ERROR_MESSAGE);
+                conn.rollback();
+                return;
+            }
+            rsStock.close();
+
+            if (stock <= 0) {
+                JOptionPane.showMessageDialog(this, "Sorry, '" + name + "' is currently out of stock.", "Out of Stock", JOptionPane.WARNING_MESSAGE);
+                conn.rollback();
+                return;
+            }
+
+            // 2. Decrement Stock
+            updateStockStmt = conn.prepareStatement(updateStockSql);
+            updateStockStmt.setInt(1, productId);
+            int stockUpdated = updateStockStmt.executeUpdate();
+
+            if (stockUpdated == 0) {
+                JOptionPane.showMessageDialog(this, "Sorry, the last item of '" + name + "' was just sold.", "Out of Stock", JOptionPane.WARNING_MESSAGE);
+                conn.rollback();
+                return;
+            }
+
+            // 3. Add/Update Cart (Quantity 1) and Get Cart ID
+            insertStmt = conn.prepareStatement(insertCartSql, Statement.RETURN_GENERATED_KEYS);
+            insertStmt.setInt(1, productId);
+            insertStmt.setString(2, name);
+            insertStmt.setDouble(3, price);
+            insertStmt.setInt(4, customerId);
+            int rowsAffected = insertStmt.executeUpdate();
+
+            if (rowsAffected > 0) {
+                 generatedKeys = insertStmt.getGeneratedKeys();
+                 if (generatedKeys.next()) {
+                     cartId = generatedKeys.getInt(1); // Get the cart_id
+                 } else {
+                     // This might happen if ON DUPLICATE KEY UPDATE was triggered but didn't return keys
+                     // We need to query the ID separately if update happened
+                     String findCartIdSql = "SELECT id FROM cart WHERE customer_id = ? AND product_id = ?";
+                     try (PreparedStatement findStmt = conn.prepareStatement(findCartIdSql)) {
+                         findStmt.setInt(1, customerId);
+                         findStmt.setInt(2, productId);
+                         ResultSet findRs = findStmt.executeQuery();
+                         if (findRs.next()) {
+                             cartId = findRs.getInt("id");
+                         }
+                         findRs.close();
+                     }
+                 }
+            }
+
+            if (cartId == -1) {
+                 // Could not get cart ID - critical error
+                 throw new SQLException("Failed to retrieve cart ID after insert/update for product ID: " + productId);
+            }
+
+            conn.commit(); // Commit transaction if all DB operations succeed
+
+            // 4. Update Cart Badge (reflects the newly added item)
+            updateCartBadge();
+
+            // 5. Address Selection
+            AddressManager.Address selectedAddress = addressManager.showAddressSelection();
+            if (selectedAddress == null) {
+                // User cancelled address selection, item remains in cart. Inform user?
+                JOptionPane.showMessageDialog(this,
+                        "Address selection cancelled. The item remains in your cart.",
+                        "Checkout Cancelled", JOptionPane.INFORMATION_MESSAGE);
+                return; // Stop the "buy now" flow here
+            }
+
+            // 6. Proceed to Payment with ONLY this item
+            System.out.println("Proceeding to payment (Buy Now) for customer " + customerId + " with cartId: " + cartId + ". Address ID: " + selectedAddress.getId());
+            List<Integer> cartIdList = new ArrayList<>();
+            cartIdList.add(cartId);
+
+            // Pass the single cart ID to PaymentFrame
+            new PaymentFrame(customerId, cartIdList, selectedAddress).setVisible(true);
+
+            // Close this CustomerFrame after launching PaymentFrame
+            dispose();
+
+        } catch (SQLException ex) {
+            System.err.println("Buy Now SQL Error: " + ex.getMessage());
+            if (conn != null) try { conn.rollback(); } catch (SQLException e) { e.printStackTrace(); }
+            JOptionPane.showMessageDialog(this, "Error processing Buy Now: " + ex.getMessage(), "Database Error", JOptionPane.ERROR_MESSAGE);
+        } catch (Exception e) {
+            System.err.println("Buy Now General Error: " + e.getMessage());
+            if (conn != null) try { conn.rollback(); } catch (SQLException se) { se.printStackTrace(); }
+            JOptionPane.showMessageDialog(this, "An unexpected error occurred during Buy Now.", "Error", JOptionPane.ERROR_MESSAGE);
+        } finally {
+            // Close resources
+            try { if (generatedKeys != null) generatedKeys.close(); } catch (SQLException ignored) {}
+            try { if (checkStmt != null) checkStmt.close(); } catch (SQLException ignored) {}
+            try { if (insertStmt != null) insertStmt.close(); } catch (SQLException ignored) {}
+            try { if (updateStockStmt != null) updateStockStmt.close(); } catch (SQLException ignored) {}
+            if (conn != null) try { conn.setAutoCommit(true); conn.close(); } catch (SQLException ignored) {}
+        }
+    }
+    // --- END of buyNow method ---
+
 
     // Product details dialog - doesn't explicitly show color/size unless in description
     private void showProductDetails(int productId, String name, double price, String description, String imagePathFromDB) {
@@ -1405,7 +1530,7 @@ public class CustomerFrame extends JFrame {
 
         JButton addToCartButton = createStyledButton("Add to Cart", ThemeColors.PRIMARY);
         addToCartButton.addActionListener(e -> {
-            addToCart(productId, name, price);
+            addToCart(productId, name, price); // Still uses the regular addToCart
             detailsDialog.dispose();
         });
 
@@ -2345,7 +2470,7 @@ public class CustomerFrame extends JFrame {
         Dimension detailsSize = detailsButton.getPreferredSize();
         Dimension cartSize = addToCartButton.getPreferredSize();
         int maxWidthBtns = Math.max(detailsSize.width, cartSize.width);
-        maxWidthBtns = Math.max(maxWidthBtns, 100); // Minimum width
+        maxWidthBtns = Math.max(maxWidthBtns, 100); // Minimum
         Dimension uniformButtonSize = new Dimension(maxWidthBtns, detailsSize.height);
 
         detailsButton.setPreferredSize(uniformButtonSize);
@@ -2363,7 +2488,7 @@ public class CustomerFrame extends JFrame {
 
         itemPanel.add(contentPanel, BorderLayout.CENTER);
         return itemPanel;
-    }
+    } // --- End of createWishlistItemPanel ---
 
 
     private void removeSelectedWishlistItems() {
@@ -2855,8 +2980,8 @@ public class CustomerFrame extends JFrame {
             if (pIdObj instanceof Integer && (Integer) pIdObj != -1 && orderIdObj instanceof Integer) {
                  // Placeholder: Launch review frame/dialog if implemented
                  // Assuming ProductReviewFrame exists and takes (customerId, productId, orderId)
-                 // new ProductReviewFrame(customerId, (Integer) pIdObj, (Integer) orderIdObj);
-                 JOptionPane.showMessageDialog(this, "Review functionality not implemented yet."); // Placeholder
+                 new ProductReviewFrame(customerId, (Integer) pIdObj, (Integer) orderIdObj);
+                 // JOptionPane.showMessageDialog(this, "Review functionality not implemented yet."); // Placeholder
             } else {
                 JOptionPane.showMessageDialog(this, "Could not determine Product ID or Order ID for review.", "Error", JOptionPane.ERROR_MESSAGE);
                 System.err.println("Review Error: Product ID=" + pIdObj + ", Order ID=" + orderIdObj);
@@ -3505,6 +3630,7 @@ public class CustomerFrame extends JFrame {
 
 
     // Adds item to cart (DB and UI), handles stock. Does not involve color/size.
+    // This is used by the "Add to Cart" button in the details dialog.
     private void addToCart(int productId, String name, double price) {
         String checkStockSql = "SELECT stock FROM products WHERE id = ?";
         // Cart insert does not include color/size columns
@@ -3899,7 +4025,7 @@ public class CustomerFrame extends JFrame {
 
 
     // Handles the checkout process: stock check, address selection, opens payment frame.
-    // Does not need color/size.
+    // This is used by the "Proceed to Checkout" button in the Cart view.
     private void checkout() {
         List<Integer> selectedCartIds = new ArrayList<>();
         double totalAmount = 0.0;
@@ -4005,15 +4131,11 @@ public class CustomerFrame extends JFrame {
             // --- Proceed to Payment ---
              System.out.println("Proceeding to payment for customer " + customerId + " with " + selectedCartIds.size() + " items. Total: " + totalAmount + ". Address ID: " + selectedAddress.getId());
 
-             // Assuming PaymentFrame exists and takes (customerId, List<Integer> cartIds, Address selectedAddress)
-             // *** NOTE: PaymentFrame needs to be created or imported if it exists elsewhere ***
-             // Example:
-             // new PaymentFrame(customerId, selectedCartIds, selectedAddress).setVisible(true);
-             JOptionPane.showMessageDialog(this, "Payment integration not implemented yet.\nData prepared:\nCustomer: "+customerId+"\nCart IDs: "+selectedCartIds+"\nTotal: "+totalAmount+"\nAddress: "+selectedAddress.getFormattedAddress());
+             // Pass the selected cart IDs (could be multiple) to PaymentFrame
+             new PaymentFrame(customerId, selectedCartIds, selectedAddress).setVisible(true);
 
-
-             // Close the current CustomerFrame (only if PaymentFrame is shown and handles the rest)
-             // dispose(); // Keep commented out until PaymentFrame integration is complete
+             // Close the current CustomerFrame
+             dispose(); // Close this frame after opening payment
 
         } catch (SQLException ex) {
             System.err.println("Error during checkout stock check: " + ex.getMessage());
@@ -4061,11 +4183,18 @@ public class CustomerFrame extends JFrame {
                 try {
                     UIManager.setLookAndFeel(new FlatDarkLaf());
                     // Apply UIManager defaults again if needed for LoginFrame specifically
+                     UIManager.put("OptionPane.background", ThemeColors.DIALOG_BG);
+                     UIManager.put("Panel.background", ThemeColors.DIALOG_BG); // General panel background
+                     UIManager.put("OptionPane.messageForeground", ThemeColors.DIALOG_FG);
+                     UIManager.put("Button.background", ThemeColors.SECONDARY); // Default button background
+                     UIManager.put("Button.foreground", Color.WHITE); // Default button text color
+                     UIManager.put("Button.focus", new Color(ThemeColors.SECONDARY.getRed(), ThemeColors.SECONDARY.getGreen(), ThemeColors.SECONDARY.getBlue(), 180)); // Focus color
+                     UIManager.put("Button.hoverBackground", ThemeColors.BUTTON_HOVER);
+                     UIManager.put("Button.pressedBackground", ThemeColors.SECONDARY.darker());
                 } catch (Exception ex) {
                     System.err.println("Failed to re-initialize FlatDarkLaf for Login");
                 }
 
-                 // *** Assuming LoginFrame exists in the same package or is imported ***
                  new LoginFrame().setVisible(true);
 
                 System.out.println("Logout successful. Closing Customer Frame."); // Can keep or remove this log
@@ -4842,127 +4971,6 @@ public class CustomerFrame extends JFrame {
             // Add the height of the current row
             dim.height += rowHeight;
         }
-    }
-
-    // --- AddressManager Dependency (Placeholder - Assumes AddressManager.java exists) ---
-    // This class needs to be implemented separately or imported
-    private static class AddressManager {
-        private JFrame parentFrame;
-        private int customerId;
-
-        public AddressManager(JFrame parent, int custId) {
-            this.parentFrame = parent;
-            this.customerId = custId;
-        }
-
-        // Placeholder method - Needs implementation in AddressManager.java
-        public Address showAddressSelection() {
-            // In a real implementation, this would show a dialog
-            // allowing the user to select/add/edit addresses.
-            // For now, it returns a dummy address or null.
-            System.out.println("AddressManager: showAddressSelection() called for customer " + customerId + " (Placeholder)");
-
-            // --- Dummy Address Logic ---
-            // Try to fetch the *first* address for the customer as a default
-            String sql = "SELECT id, street, city, state, postal_code, country FROM addresses WHERE customer_id = ? LIMIT 1";
-            try (Connection conn = DBConnection.connect(); PreparedStatement stmt = conn.prepareStatement(sql)) {
-                stmt.setInt(1, customerId);
-                ResultSet rs = stmt.executeQuery();
-                if (rs.next()) {
-                    // Return the first found address
-                     System.out.println("AddressManager: Found existing address (ID: "+rs.getInt("id")+"). Using it.");
-                    return new Address(
-                        rs.getInt("id"),
-                        rs.getString("street"),
-                        rs.getString("city"),
-                        rs.getString("state"),
-                        rs.getString("postal_code"),
-                        rs.getString("country")
-                    );
-                } else {
-                    // No address found, prompt user (via JOptionPane for simplicity here)
-                     System.out.println("AddressManager: No address found for customer " + customerId);
-                     JOptionPane.showMessageDialog(parentFrame, "No shipping address found. Please add an address in your profile.", "Address Required", JOptionPane.WARNING_MESSAGE);
-                     return null; // Indicate no address selected/available
-                }
-            } catch (SQLException e) {
-                System.err.println("AddressManager: Error fetching address - " + e.getMessage());
-                 JOptionPane.showMessageDialog(parentFrame, "Error fetching address information.", "Database Error", JOptionPane.ERROR_MESSAGE);
-                return null; // Return null on error
-            }
-            // --- End Dummy Address Logic ---
-        }
-
-        // Placeholder Inner Class for Address data structure
-        public static class Address {
-            private int id;
-            private String street, city, state, postalCode, country;
-
-            public Address(int id, String street, String city, String state, String postalCode, String country) {
-                this.id = id;
-                this.street = street;
-                this.city = city;
-                this.state = state;
-                this.postalCode = postalCode;
-                this.country = country;
-            }
-
-            public int getId() { return id; }
-            public String getStreet() { return street;}
-            public String getCity() { return city;}
-            public String getState() { return state;}
-            public String getPostalCode() { return postalCode;}
-            public String getCountry() { return country;}
-
-            public String getFormattedAddress() {
-                return String.format("%s, %s, %s, %s, %s", street, city, state, postalCode, country);
-            }
-        }
-    } // End AddressManager Placeholder
-
-     // --- PaymentFrame Dependency (Placeholder - Assumes PaymentFrame.java exists) ---
-     // This class needs to be implemented separately or imported
-     private static class PaymentFrame extends JFrame {
-         // Placeholder constructor - Needs implementation in PaymentFrame.java
-         public PaymentFrame(int customerId, List<Integer> cartIds, AddressManager.Address address) {
-             super("Payment Process (Placeholder)");
-             // In a real implementation, this frame would handle payment methods,
-             // confirm the order, update stock, clear cart, create order records, etc.
-             System.out.println("PaymentFrame: Initialized for customer " + customerId);
-             System.out.println("  Cart IDs: " + cartIds);
-             System.out.println("  Address: " + address.getFormattedAddress());
-
-             setSize(400, 300);
-             setLocationRelativeTo(null);
-             setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE); // Dispose only this frame on close
-
-             JLabel placeholderLabel = new JLabel("<html><center>Payment Frame Placeholder<br>Implement actual payment logic here.</center></html>", SwingConstants.CENTER);
-             placeholderLabel.setFont(new Font("Arial", Font.BOLD, 16));
-             add(placeholderLabel);
-
-             // Make it visible for demonstration
-             // setVisible(true); // Comment out if you want checkout to just print to console for now
-         }
-     } // End PaymentFrame Placeholder
-
-      // --- LoginFrame Dependency (Placeholder - Assumes LoginFrame.java exists) ---
-      // This class needs to be implemented separately or imported
-      private static class LoginFrame extends JFrame {
-          // Placeholder constructor - Needs implementation in LoginFrame.java
-          public LoginFrame() {
-              super("Login (Placeholder)");
-              // In a real implementation, this frame would handle user login
-              setSize(350, 250);
-              setLocationRelativeTo(null);
-              setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE); // Exit application if login is closed
-
-              JLabel placeholderLabel = new JLabel("Login Frame Placeholder", SwingConstants.CENTER);
-              placeholderLabel.setFont(new Font("Arial", Font.BOLD, 16));
-              add(placeholderLabel);
-
-              // Normally setVisible(true) would be called from where LoginFrame is created (e.g., main method initially)
-          }
-      } // End LoginFrame Placeholder
-
+    } // --- End of WrapLayout ---
 
 }

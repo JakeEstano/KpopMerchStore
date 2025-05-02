@@ -13,6 +13,8 @@ import java.io.File;
 import java.io.IOException;
 import java.net.URL;
 import java.nio.file.Files;
+import java.nio.file.Path; // Import Path
+import java.nio.file.Paths; // Import Paths
 import java.nio.file.StandardCopyOption;
 import java.sql.*;
 import java.text.ParseException;
@@ -143,19 +145,13 @@ public class AdminFrame extends JFrame {
     public AdminFrame() {
         // --- THEME: Using imported ThemeColors ---
         setTitle("Admin Panel - K-Pop Merch Store");
-        setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
+        setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE); // Use DISPOSE_ON_CLOSE if this isn't the main exit point
         setLayout(new BorderLayout());
 
-        // Set to full screen or maximized
-        GraphicsEnvironment env = GraphicsEnvironment.getLocalGraphicsEnvironment();
-        GraphicsDevice device = env.getDefaultScreenDevice();
-
-        if (device.isFullScreenSupported()) {
-            setUndecorated(true);
-            device.setFullScreenWindow(this);
-        } else {
-            setExtendedState(JFrame.MAXIMIZED_BOTH);
-        }
+        // --- START MODIFICATION: Full Screen and Undecorated ---
+        setUndecorated(true); // Remove window title bar and borders
+        setExtendedState(JFrame.MAXIMIZED_BOTH); // Maximize the frame
+        // --- END MODIFICATION ---
 
         // CardLayout for switching between views
         cardLayout = new CardLayout();
@@ -183,11 +179,10 @@ public class AdminFrame extends JFrame {
         add(mainPanel, BorderLayout.CENTER);
         add(createNavigationBar(), BorderLayout.WEST);
 
-        setLocationRelativeTo(null);
-        setVisible(true);
+        //setLocationRelativeTo(null); // No longer needed with MAXIMIZED_BOTH
+        setVisible(true); // Make visible *after* setting undecorated and adding components
 
         // Load initial data for dashboard metrics after frame is visible
-        // This avoids potential issues with UI components not being ready
         SwingUtilities.invokeLater(this::refreshDashboardMetrics);
         // Load initial charts for statistics panel
         SwingUtilities.invokeLater(this::updateStatisticsCharts);
@@ -614,7 +609,8 @@ public class AdminFrame extends JFrame {
     // --- Panel Creation Methods (Use imported ThemeColors via helpers) ---
     private JPanel createUsersPanel() {
         JPanel panel = createTablePanel("User Management");
-        userTableModel = new DefaultTableModel(new String[]{"ID", "Name", "Email", "Role", "Loyalty Points"}, 0) {
+        // Removed "Loyalty Points" column
+        userTableModel = new DefaultTableModel(new String[]{"ID", "Name", "Email", "Role"}, 0) {
              @Override public boolean isCellEditable(int row, int column) { return false; }
         };
         userTable = new JTable(userTableModel);
@@ -829,14 +825,14 @@ public class AdminFrame extends JFrame {
                  cm.getColumn(4).setPreferredWidth(80);  // Stock
                  cm.getColumn(5).setPreferredWidth(150); // Group
                  cm.getColumn(6).setPreferredWidth(200); // DB Image Path (can be wider)
-             } else if (table == userTable) { // Columns: ID, Name, Email, Role, Loyalty Points
+             } else if (table == userTable) { // Columns: ID, Name, Email, Role (Removed Loyalty Points)
                  cm.getColumn(0).setCellRenderer(centerRenderer); // ID
-                 cm.getColumn(4).setCellRenderer(centerRenderer); // Loyalty Points
+                 // No alignment needed for Loyalty Points as it's removed
                  cm.getColumn(0).setPreferredWidth(50);
-                 cm.getColumn(1).setPreferredWidth(200); // Name
-                 cm.getColumn(2).setPreferredWidth(250); // Email
+                 cm.getColumn(1).setPreferredWidth(250); // Name // Reverted from 250
+                 cm.getColumn(2).setPreferredWidth(300); // Email // Reverted from 300
                  cm.getColumn(3).setPreferredWidth(100); // Role
-                 cm.getColumn(4).setPreferredWidth(120); // Loyalty Points
+                 // No width needed for Loyalty Points
              } else if (table == inventoryTable) { // Columns: ID, Name, Stock, Reorder Level
                   cm.getColumn(0).setCellRenderer(centerRenderer); // ID
                   cm.getColumn(2).setCellRenderer(centerRenderer); // Stock
@@ -1053,18 +1049,18 @@ public class AdminFrame extends JFrame {
 
     // --- Data Loading Methods (Adjusted queries based on schema) ---
     private void loadUsers() {
-         // Using columns from 'customers' table schema
+         // Using columns from 'customers' table schema, removed loyalty_points
          try (Connection conn = DBConnection.connect();
               Statement stmt = conn.createStatement();
-              ResultSet rs = stmt.executeQuery("SELECT id, name, email, role, loyalty_points FROM customers")) {
+              ResultSet rs = stmt.executeQuery("SELECT id, name, email, role FROM customers")) { // Removed loyalty_points from query
              userTableModel.setRowCount(0);
              while (rs.next()) {
                  userTableModel.addRow(new Object[]{
                      rs.getInt("id"),
                      rs.getString("name"),
                      rs.getString("email"),
-                     rs.getString("role"),
-                     rs.getInt("loyalty_points")
+                     rs.getString("role")
+                     // Removed loyalty points loading
                  });
              }
          } catch (SQLException ex) {
@@ -1505,28 +1501,36 @@ public class AdminFrame extends JFrame {
                 String finalImagePath = null;
                 if (selectedImageFile[0] != null) {
                     File sourceFile = selectedImageFile[0];
-                    File imagesDir = new File("images/products");
-                    if (!imagesDir.exists()) {
-                        if (!imagesDir.mkdirs()) {
-                            System.err.println("Failed to create product images directory: " + imagesDir.getAbsolutePath());
-                            showThemedJOptionPane("Could not create directory for images.","Directory Error", JOptionPane.ERROR_MESSAGE);
-                            return;
+                    // Define target directory (e.g., project_root/images/products/)
+                    Path targetDir = Paths.get("images", "products");
+                     try {
+                        Files.createDirectories(targetDir); // Create directory if it doesn't exist
+
+                        String originalFilename = sourceFile.getName();
+                        String extension = "";
+                        int dotIndex = originalFilename.lastIndexOf('.');
+                        if (dotIndex > 0 && dotIndex < originalFilename.length() - 1) {
+                            extension = originalFilename.substring(dotIndex); // Get file extension
                         }
-                    }
-                    String extension = "";
-                    int i = sourceFile.getName().lastIndexOf('.');
-                    if (i > 0) extension = sourceFile.getName().substring(i);
-                    String safeName = name.replaceAll("[^a-zA-Z0-9.\\-_ ]", "_");
-                    String newFileName = "product_" + safeName + "_" + System.currentTimeMillis() + extension;
-                    File destinationFile = new File(imagesDir, newFileName);
-                    try {
-                        Files.copy(sourceFile.toPath(), destinationFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
-                        finalImagePath = imagesDir.getPath().replace("\\", "/") + "/" + newFileName;
-                    } catch (IOException ioEx) {
-                        System.err.println("Error copying image file: " + ioEx.getMessage());
-                        showThemedJOptionPane("Could not save the image file: " + ioEx.getMessage(),"File Copy Error", JOptionPane.ERROR_MESSAGE);
-                        return;
-                    }
+
+                        // Sanitize name and create a unique filename
+                        String safeName = name.replaceAll("[^a-zA-Z0-9.\\-_ ]", "_");
+                        String newFileName = "product_" + safeName + "_" + System.currentTimeMillis() + extension;
+                        Path targetPath = targetDir.resolve(newFileName);
+
+                        // Copy the file
+                        Files.copy(sourceFile.toPath(), targetPath, StandardCopyOption.REPLACE_EXISTING);
+
+                        // Store the relative path using forward slashes
+                        finalImagePath = targetDir.toString().replace("\\", "/") + "/" + newFileName;
+                        System.out.println("Image saved to: " + finalImagePath);
+
+                     } catch (IOException ioEx) {
+                         System.err.println("Error copying image file: " + ioEx.getMessage());
+                         ioEx.printStackTrace();
+                         showThemedJOptionPane("Could not save the image file: " + ioEx.getMessage(),"File Copy Error", JOptionPane.ERROR_MESSAGE);
+                         return; // Stop if image copy fails
+                     }
                 }
 
                 // Pass color and size to save method
@@ -1762,47 +1766,64 @@ public class AdminFrame extends JFrame {
                 int reorderLevel = reorderStr.isEmpty() ? 0 : Integer.parseInt(reorderStr);
 
                 String finalImagePath = originalImagePath[0]; // Start with the original path
+                String oldImagePathToDelete = null;
 
                 // If a new image was selected, process it
                 if (selectedImageFile[0] != null) {
                     File sourceFile = selectedImageFile[0];
-                    File imagesDir = new File("images/products");
-                    if (!imagesDir.exists()) {
-                         if (!imagesDir.mkdirs()) {
-                            System.err.println("Failed to create product images directory: " + imagesDir.getAbsolutePath());
-                            showThemedJOptionPane("Could not create directory for images.","Directory Error", JOptionPane.ERROR_MESSAGE);
-                            return;
-                         }
-                    }
-                    String extension = "";
-                    int i = sourceFile.getName().lastIndexOf('.');
-                    if (i > 0) extension = sourceFile.getName().substring(i);
-                    String safeName = name.replaceAll("[^a-zA-Z0-9.\\-_ ]", "_");
-                    String newFileName = "product_" + safeName + "_" + System.currentTimeMillis() + extension;
-                    File destinationFile = new File(imagesDir, newFileName);
-                    try {
-                        Files.copy(sourceFile.toPath(), destinationFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
-                        finalImagePath = imagesDir.getPath().replace("\\", "/") + "/" + newFileName; // Update path
+                    Path targetDir = Paths.get("images", "products");
+                     try {
+                        Files.createDirectories(targetDir); // Ensure directory exists
 
-                        // Optional: Delete old image file if it exists and is different from the new one
-                        if (originalImagePath[0] != null && !originalImagePath[0].isEmpty() && !originalImagePath[0].equals(finalImagePath)) {
-                             File oldFile = new File(originalImagePath[0]);
-                             if (oldFile.exists() && !oldFile.isDirectory()) {
-                                 try {
-                                     if (oldFile.delete()) { System.out.println("Deleted old image file: " + originalImagePath[0]); }
-                                     else { System.err.println("Could not delete old image file: " + originalImagePath[0]); }
-                                 } catch (SecurityException se) { System.err.println("Security error deleting old image file: " + se.getMessage()); }
-                             }
+                        String originalFilename = sourceFile.getName();
+                        String extension = "";
+                        int dotIndex = originalFilename.lastIndexOf('.');
+                        if (dotIndex > 0 && dotIndex < originalFilename.length() - 1) {
+                            extension = originalFilename.substring(dotIndex);
                         }
-                    } catch (IOException ioEx) {
+
+                        String safeName = name.replaceAll("[^a-zA-Z0-9.\\-_ ]", "_");
+                        String newFileName = "product_" + safeName + "_" + System.currentTimeMillis() + extension;
+                        Path targetPath = targetDir.resolve(newFileName);
+
+                        // Copy the new file
+                        Files.copy(sourceFile.toPath(), targetPath, StandardCopyOption.REPLACE_EXISTING);
+                        finalImagePath = targetDir.toString().replace("\\", "/") + "/" + newFileName; // Update path
+
+                        // Mark old image for deletion if it's different
+                        if (originalImagePath[0] != null && !originalImagePath[0].isEmpty() && !originalImagePath[0].equals(finalImagePath)) {
+                            oldImagePathToDelete = originalImagePath[0];
+                        }
+
+                     } catch (IOException ioEx) {
                          System.err.println("Error copying updated image file: " + ioEx.getMessage());
+                         ioEx.printStackTrace();
                          showThemedJOptionPane("Could not save the updated image file: " + ioEx.getMessage(),"File Copy Error", JOptionPane.ERROR_MESSAGE);
                          return; // Don't proceed with DB update if image copy failed
-                    }
+                     }
                 }
 
                 // Call update method with all fields, including color and size
                 if (updateProduct(productId, name, price, stock, groupName, description, finalImagePath, reorderLevel, color, size)) {
+                    // Delete old image *after* successful DB update
+                     if (oldImagePathToDelete != null) {
+                        try {
+                             Path oldPath = Paths.get(oldImagePathToDelete);
+                              if (Files.exists(oldPath) && !Files.isDirectory(oldPath)) {
+                                 if (Files.deleteIfExists(oldPath)) {
+                                     System.out.println("Deleted old image file: " + oldImagePathToDelete);
+                                 } else {
+                                     System.err.println("Could not delete old image file (in use?): " + oldImagePathToDelete);
+                                 }
+                              }
+                        } catch (IOException ioEx) {
+                             System.err.println("Error deleting old image file '" + oldImagePathToDelete + "': " + ioEx.getMessage());
+                             // Don't stop the user flow for this, just log it
+                        } catch (Exception ex) {
+                            System.err.println("Unexpected error deleting old image file: " + ex.getMessage());
+                        }
+                     }
+
                     loadProducts(); // Reload the table to reflect changes
                     dialog.dispose();
                     showThemedJOptionPane("Product updated successfully!", "Success", JOptionPane.INFORMATION_MESSAGE);
@@ -1876,15 +1897,25 @@ public class AdminFrame extends JFrame {
                      // Image deletion logic
                      if (imagePath != null && !imagePath.isEmpty()) {
                          try {
-                             File imageFile = new File(imagePath);
-                             if (imageFile.exists() && !imageFile.isDirectory()) {
-                                 if (imageFile.delete()) { System.out.println("Deleted image file: " + imagePath); }
-                                 else { System.err.println("Failed to delete image file (check permissions/usage): " + imagePath); }
-                             } else { System.out.println("Image file not found or is a directory, skipping deletion: " + imagePath); }
+                             Path pathToDelete = Paths.get(imagePath);
+                             // Check if it exists and is not a directory
+                             if (Files.exists(pathToDelete) && !Files.isDirectory(pathToDelete)) {
+                                 if (Files.deleteIfExists(pathToDelete)) {
+                                     System.out.println("Deleted image file: " + imagePath);
+                                 } else {
+                                     System.err.println("Failed to delete image file (check permissions/usage): " + imagePath);
+                                 }
+                             } else {
+                                 System.out.println("Image file not found or is a directory, skipping deletion: " + imagePath);
+                             }
                          } catch (SecurityException se) {
                              System.err.println("Security error deleting image file " + imagePath + ": " + se.getMessage());
                              showThemedJOptionPane("Could not delete image file due to security restrictions:\n" + imagePath,"File Deletion Error", JOptionPane.ERROR_MESSAGE);
-                         } catch (Exception e) { System.err.println("Error attempting to delete image file " + imagePath + ": " + e.getMessage()); }
+                         } catch (IOException ioEx) {
+                            System.err.println("I/O Error attempting to delete image file " + imagePath + ": " + ioEx.getMessage());
+                         } catch (Exception e) {
+                             System.err.println("Error attempting to delete image file " + imagePath + ": " + e.getMessage());
+                         }
                      }
 
                      // Remove row from model - Use invokeLater to ensure it runs on EDT after DB operation
@@ -2085,13 +2116,13 @@ public class AdminFrame extends JFrame {
          String currentName = (String) userTableModel.getValueAt(selectedRow, 1);
          String currentEmail = (String) userTableModel.getValueAt(selectedRow, 2);
          String currentRole = (String) userTableModel.getValueAt(selectedRow, 3);
-         int currentPoints = (int) userTableModel.getValueAt(selectedRow, 4);
+         // Removed loyalty points variable
          final int rowToUpdate = selectedRow; // Store view row index
 
          JDialog dialog = new JDialog(this, "Edit User (ID: " + userId + ")", true);
          dialog.setLayout(new BorderLayout());
          dialog.getContentPane().setBackground(ThemeColors.BACKGROUND); // Use imported theme color
-         dialog.setSize(450, 300);
+         dialog.setSize(450, 250); // Adjusted size after removing points field
          dialog.setLocationRelativeTo(this);
 
          JPanel formPanel = new JPanel(new GridBagLayout());
@@ -2106,7 +2137,7 @@ public class AdminFrame extends JFrame {
          // Roles based on 'customers' table enum definition
          JComboBox<String> roleCombo = new JComboBox<>(new String[]{"customer", "admin"});
          roleCombo.setSelectedItem(currentRole);
-         JSpinner pointsSpinner = new JSpinner(new SpinnerNumberModel(currentPoints, 0, 100000, 1)); // Min loyalty points is 0
+         // Removed points spinner
 
          gbc.gridx = 0; gbc.gridy = 0; formPanel.add(createFormLabel("Name:"), gbc); // Uses imported ThemeColors
          gbc.gridx = 1; gbc.fill = GridBagConstraints.HORIZONTAL; gbc.weightx = 1.0; formPanel.add(nameField, gbc);
@@ -2117,8 +2148,7 @@ public class AdminFrame extends JFrame {
          gbc.gridx = 0; gbc.gridy++; gbc.fill = GridBagConstraints.NONE; gbc.weightx = 0.0; formPanel.add(createFormLabel("Role:"), gbc); // Uses imported ThemeColors
          gbc.gridx = 1; gbc.anchor = GridBagConstraints.WEST; formPanel.add(roleCombo, gbc);
 
-         gbc.gridx = 0; gbc.gridy++; gbc.anchor = GridBagConstraints.WEST; formPanel.add(createFormLabel("Loyalty Points:"), gbc); // Uses imported ThemeColors
-         gbc.gridx = 1; gbc.anchor = GridBagConstraints.WEST; formPanel.add(pointsSpinner, gbc);
+         // Removed loyalty points label and field layout
 
          JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
          buttonPanel.setBackground(ThemeColors.BACKGROUND); // Use imported theme color
@@ -2129,19 +2159,20 @@ public class AdminFrame extends JFrame {
                  String name = nameField.getText().trim();
                  String email = emailField.getText().trim();
                  String role = (String) roleCombo.getSelectedItem();
-                 int points = (int) pointsSpinner.getValue();
+                 // Removed points variable retrieval
 
                  if (name.isEmpty() || email.isEmpty()) { showThemedJOptionPane("Name and Email cannot be empty.", "Input Error", JOptionPane.ERROR_MESSAGE); return; }
                  // Basic email format check
                  if (!email.contains("@") || !email.contains(".")) { showThemedJOptionPane("Please enter a valid email address.", "Input Error", JOptionPane.ERROR_MESSAGE); return; }
 
-                 if (updateUser(userId, name, email, role, points)) {
+                 // Pass updated parameters to updateUser (without points)
+                 if (updateUser(userId, name, email, role)) {
                       // Update table model directly if row is still valid
                       if (rowToUpdate >= 0 && rowToUpdate < userTableModel.getRowCount() && (int)userTableModel.getValueAt(rowToUpdate, 0) == userId) {
                          userTableModel.setValueAt(name, rowToUpdate, 1);
                          userTableModel.setValueAt(email, rowToUpdate, 2);
                          userTableModel.setValueAt(role, rowToUpdate, 3);
-                         userTableModel.setValueAt(points, rowToUpdate, 4);
+                         // Removed updating points column
                       } else {
                           loadUsers(); // Reload if row became invalid
                       }
@@ -2150,8 +2181,9 @@ public class AdminFrame extends JFrame {
                  } else {
                       // Error message shown in updateUser method
                  }
-             } catch (NumberFormatException ex) {
-                 showThemedJOptionPane("Invalid number format for loyalty points.","Error", JOptionPane.ERROR_MESSAGE);
+             } catch (Exception ex) { // Catch general exceptions
+                 ex.printStackTrace();
+                 showThemedJOptionPane("An unexpected error occurred: " + ex.getMessage(),"Error", JOptionPane.ERROR_MESSAGE);
              }
          });
 
@@ -2165,21 +2197,22 @@ public class AdminFrame extends JFrame {
          dialog.add(buttonPanel, BorderLayout.SOUTH);
          dialog.setVisible(true);
     }
-    private boolean updateUser(int userId, String name, String email, String role, int points) {
-         // SQL uses columns from 'customers' table
+    // Updated updateUser signature - removed points parameter
+    private boolean updateUser(int userId, String name, String email, String role) {
+         // SQL uses columns from 'customers' table, removed loyalty_points
+         String sql = "UPDATE customers SET name = ?, email = ?, role = ? WHERE id = ?"; // Removed loyalty_points = ?
          try (Connection conn = DBConnection.connect();
-              PreparedStatement stmt = conn.prepareStatement(
-                  "UPDATE customers SET name = ?, email = ?, role = ?, loyalty_points = ? WHERE id = ?")) {
+              PreparedStatement stmt = conn.prepareStatement(sql)) {
              stmt.setString(1, name);
              stmt.setString(2, email);
              stmt.setString(3, role);
-             stmt.setInt(4, points);
-             stmt.setInt(5, userId);
+             // Removed setting loyalty_points
+             stmt.setInt(4, userId); // Index is now 4 for ID
              return stmt.executeUpdate() > 0;
          } catch (SQLException ex) {
              ex.printStackTrace();
              // Check for duplicate email error (assuming standard SQL state for unique constraint violation)
-             if (ex.getSQLState().startsWith("23")) { // SQL state for integrity constraint violation
+             if (ex.getSQLState() != null && ex.getSQLState().startsWith("23")) { // SQL state for integrity constraint violation
                    showThemedJOptionPane("Error updating user: Email address '" + email + "' is already in use.","Update Error (Duplicate Email)", JOptionPane.ERROR_MESSAGE);
              } else {
                  showThemedJOptionPane("Error updating user: " + ex.getMessage(),"Database Error", JOptionPane.ERROR_MESSAGE);
@@ -2195,9 +2228,18 @@ public class AdminFrame extends JFrame {
             "Are you sure you want to log out?", "Logout Confirmation",
             JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
         if (confirm == JOptionPane.YES_OPTION) {
-            dispose();
+            dispose(); // Close the AdminFrame
             // Assuming LoginFrame handles its own visibility and setup
-            SwingUtilities.invokeLater(LoginFrame::new);
+            // Apply theme *before* creating LoginFrame instance
+             try {
+                 UIManager.setLookAndFeel(new FlatDarkLaf());
+                 UIManager.put("OptionPane.background", ThemeColors.DIALOG_BG);
+                 UIManager.put("Panel.background", ThemeColors.DIALOG_BG);
+                 UIManager.put("OptionPane.messageForeground", ThemeColors.DIALOG_FG);
+                 UIManager.put("Button.background", ThemeColors.SECONDARY);
+                 UIManager.put("Button.foreground", Color.WHITE);
+             } catch (Exception ex) { System.err.println("Failed to re-apply theme for LoginFrame"); }
+             SwingUtilities.invokeLater(LoginFrame::new); // Show LoginFrame
         }
     }
      private JLabel createFormLabel(String text) {

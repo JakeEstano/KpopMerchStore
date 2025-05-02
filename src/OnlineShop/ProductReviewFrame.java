@@ -1,8 +1,9 @@
-// --- START OF FILE ProductReviewFrame.java ---
 package OnlineShop;
 
 import javax.swing.*;
 import java.awt.*;
+import java.awt.event.MouseAdapter; // Import specific MouseAdapter
+import java.awt.event.MouseEvent;   // Import specific MouseEvent
 import java.sql.*;
 
 public class ProductReviewFrame extends JFrame {
@@ -209,10 +210,10 @@ public class ProductReviewFrame extends JFrame {
         button.setForeground(Color.WHITE);
         button.setFocusPainted(false);
         button.setBorder(BorderFactory.createEmptyBorder(10, 20, 10, 20));
-        button.addMouseListener(new java.awt.event.MouseAdapter() { // Specify package if needed
+        button.addMouseListener(new MouseAdapter() { // Specify package if needed
             Color originalBg = bgColor;
-            @Override public void mouseEntered(java.awt.event.MouseEvent e) { button.setBackground(ThemeColors.BUTTON_HOVER); }
-            @Override public void mouseExited(java.awt.event.MouseEvent e) { button.setBackground(originalBg); }
+            @Override public void mouseEntered(MouseEvent e) { button.setBackground(ThemeColors.BUTTON_HOVER); }
+            @Override public void mouseExited(MouseEvent e) { button.setBackground(originalBg); }
         });
         return button;
     }

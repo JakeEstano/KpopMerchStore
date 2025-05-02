@@ -40,6 +40,19 @@ public class AddressManager {
         private String recipientName; // Added field
         private String phone;         // Added field
 
+        // Required for placeholder usage in CustomerFrame
+        public Address(int id, String street, String city, String state, String postalCode, String country) {
+            this.id = id;
+            this.customerId = -1; // Indicate placeholder
+            this.streetAddress = street;
+            this.municipalityName = city; // Map simple structure to detailed
+            this.provinceName = state;
+            // postalCode and country are not directly used in the main Address structure but stored here for the placeholder
+            this.regionId = null; this.provinceId = null; this.municipalityId = null; this.barangayId = null;
+            this.isDefault = false; this.regionName = null; this.barangayName = null;
+            this.recipientName = null; this.phone = null;
+        }
+
         public Address(int id, int customerId, String regionId, String provinceId,
                        String municipalityId, String barangayId, String streetAddress, boolean isDefault,
                        String regionName, String provinceName, String municipalityName, String barangayName,
@@ -76,6 +89,16 @@ public class AddressManager {
         public String getRecipientName() { return recipientName; } // Added getter
         public String getPhone() { return phone; }                 // Added getter
 
+        // Placeholder getter for simple formatted address (used in CustomerFrame placeholder)
+        public String getFormattedAddress() {
+             if (this.customerId == -1) { // Check if it's a placeholder
+                return String.format("%s, %s, %s", streetAddress, municipalityName, provinceName); // Adjust format as needed
+             } else {
+                 // Use the detailed address format
+                 return getFullAddressForDisplay().replaceAll("<br>", ", ").replaceAll("\\<.*?\\>", ""); // Remove HTML tags for simple format
+             }
+        }
+
         // Updated getFullAddress to include name and phone for display card
         public String getFullAddressForDisplay() {
             String recipientPart = (recipientName != null && !recipientName.isEmpty() && !recipientName.startsWith("[")) ? "<b>Recipient:</b> " + recipientName + "<br>" : "";
@@ -92,6 +115,10 @@ public class AddressManager {
             if (addressDetails.endsWith(",")) {
                 addressDetails = addressDetails.substring(0, addressDetails.length() - 1).trim();
             }
+             // Handle empty address details gracefully
+             if (addressDetails.isEmpty()) {
+                addressDetails = "[Address details incomplete]";
+             }
             // Combine all parts for the final display string
             return recipientPart + phonePart + addressDetails;
         }
@@ -100,7 +127,13 @@ public class AddressManager {
          public String toString() {
              // toString can remain simpler, e.g., for logging or internal use
              String basicAddress = String.format("%s, %s, %s, %s, %s",
-                 streetAddress, barangayName, municipalityName, provinceName, regionName);
+                 streetAddress != null ? streetAddress : "",
+                 barangayName != null ? barangayName : "",
+                 municipalityName != null ? municipalityName : "",
+                 provinceName != null ? provinceName : "",
+                 regionName != null ? regionName : "");
+             // Clean up multiple commas from potentially null parts
+             basicAddress = basicAddress.replaceAll("(,\\s*)+", ", ").replaceAll("^,\\s*|\\s*,$", "");
              return basicAddress + (isDefault ? " (Default)" : "");
          }
     } // End Address Class
@@ -111,11 +144,15 @@ public class AddressManager {
         try {
             List<Address> addresses = getCustomerAddresses();
             AddressSelectionDialog dialog = new AddressSelectionDialog(customerFrame, addresses);
-            dialog.setVisible(true);
-            selectedAddress = dialog.getSelectedAddress();
+            dialog.setVisible(true); // This makes the dialog modal and blocks until closed
+            selectedAddress = dialog.getSelectedAddress(); // Get the result after the dialog is closed
+        } catch (HeadlessException he) {
+             System.err.println("[AddressManager ERROR] Headless environment detected. Cannot show dialog.");
+             // Handle headless environment appropriately, maybe return a default or throw exception
         } catch (Exception e) {
              System.err.println("[AddressManager ERROR] Error showing address dialog: " + e.getMessage());
              e.printStackTrace();
+             // Use invokeLater to ensure message dialog is shown on EDT
              SwingUtilities.invokeLater(() -> showThemedJOptionPaneStatic(customerFrame,
                  "Could not display address selection: " + e.getMessage(),
                  "Dialog Error", JOptionPane.ERROR_MESSAGE));
@@ -138,10 +175,18 @@ public class AddressManager {
                      "WHERE ca.customer_id = ? ORDER BY ca.is_default DESC, ca.id";
         System.out.println("[AddressManager DEBUG] Fetching addresses for customer ID: " + customerId);
 
-        try (Connection conn = DBConnection.connect();
-             PreparedStatement stmt = conn.prepareStatement(sql)) {
+        Connection conn = null; // Declare connection outside try-with-resources for manual closing
+        PreparedStatement stmt = null;
+        ResultSet rs = null;
+
+        try {
+            conn = DBConnection.connect(); // Use your DBConnection class
+            if (conn == null) {
+                throw new SQLException("Failed to establish database connection.");
+            }
+            stmt = conn.prepareStatement(sql);
             stmt.setInt(1, customerId);
-            ResultSet rs = stmt.executeQuery();
+            rs = stmt.executeQuery();
             int count = 0;
             while (rs.next()) {
                 count++;
@@ -167,6 +212,12 @@ public class AddressManager {
         } catch(Exception e) {
             System.err.println("[AddressManager ERROR] Unexpected error during address loading: " + e.getMessage());
             e.printStackTrace();
+        } finally {
+             // Close resources manually in the finally block
+             try { if (rs != null) rs.close(); } catch (SQLException ignored) {}
+             try { if (stmt != null) stmt.close(); } catch (SQLException ignored) {}
+             // Use the closeDbConnection helper method
+             closeDbConnection(conn);
         }
         System.out.println("[AddressManager DEBUG] getCustomerAddresses returning list size: " + addresses.size());
         return addresses;
@@ -174,187 +225,216 @@ public class AddressManager {
 
     private void saveAddressToDatabase(Address address) {
         Connection conn = null;
+        PreparedStatement unsetStmt = null;
+        PreparedStatement stmt = null;
         try {
             conn = DBConnection.connect();
+             if (conn == null) throw new SQLException("DB Connection failed");
             conn.setAutoCommit(false);
             if (address.isDefault()) {
-                try (PreparedStatement unsetStmt = conn.prepareStatement(
-                    "UPDATE customer_addresses SET is_default = FALSE WHERE customer_id = ? AND is_default = TRUE")) {
-                    unsetStmt.setInt(1, customerId);
-                    unsetStmt.executeUpdate();
-                }
+                unsetStmt = conn.prepareStatement(
+                    "UPDATE customer_addresses SET is_default = FALSE WHERE customer_id = ? AND is_default = TRUE");
+                unsetStmt.setInt(1, customerId);
+                unsetStmt.executeUpdate();
             }
             String sql = "INSERT INTO customer_addresses " +
                          "(customer_id, region_id, province_id, municipality_id, barangay_id, street_address, is_default, recipient_name, phone) " +
                          "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
-            try (PreparedStatement stmt = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
-                stmt.setInt(1, customerId);
-                stmt.setString(2, address.getRegionId());
-                stmt.setString(3, address.getProvinceId());
-                stmt.setString(4, address.getMunicipalityId());
-                stmt.setString(5, address.getBarangayId());
-                stmt.setString(6, address.getStreetAddress());
-                stmt.setBoolean(7, address.isDefault());
-                stmt.setString(8, address.getRecipientName());
-                stmt.setString(9, address.getPhone());
-                stmt.executeUpdate();
-                conn.commit();
-            } catch (SQLException ex) {
-                conn.rollback(); throw ex;
-            }
+            stmt = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS);
+            stmt.setInt(1, customerId);
+            stmt.setString(2, address.getRegionId());
+            stmt.setString(3, address.getProvinceId());
+            stmt.setString(4, address.getMunicipalityId());
+            stmt.setString(5, address.getBarangayId());
+            stmt.setString(6, address.getStreetAddress());
+            stmt.setBoolean(7, address.isDefault());
+            stmt.setString(8, address.getRecipientName());
+            stmt.setString(9, address.getPhone());
+            stmt.executeUpdate();
+            conn.commit();
+
         } catch (SQLException ex) {
+            if (conn != null) {
+                try { conn.rollback(); } catch (SQLException e) { e.printStackTrace(); }
+            }
             handleSqlError("Error saving address", ex);
         } finally {
-            closeDbConnection(conn);
+             try { if (unsetStmt != null) unsetStmt.close(); } catch (SQLException ignored) {}
+             try { if (stmt != null) stmt.close(); } catch (SQLException ignored) {}
+            closeDbConnection(conn); // Handles setAutoCommit(true) and close()
         }
     }
 
     private boolean updateAddressInDatabase(Address address) {
         Connection conn = null;
+        PreparedStatement unsetStmt = null;
+        PreparedStatement stmt = null;
         boolean success = false;
         try {
             conn = DBConnection.connect();
+             if (conn == null) throw new SQLException("DB Connection failed");
             conn.setAutoCommit(false);
             if (address.isDefault()) {
-                try (PreparedStatement unsetStmt = conn.prepareStatement(
-                    "UPDATE customer_addresses SET is_default = FALSE WHERE customer_id = ? AND id != ? AND is_default = TRUE")) {
-                    unsetStmt.setInt(1, customerId);
-                    unsetStmt.setInt(2, address.getId());
-                    unsetStmt.executeUpdate();
-                }
+                unsetStmt = conn.prepareStatement(
+                    "UPDATE customer_addresses SET is_default = FALSE WHERE customer_id = ? AND id != ? AND is_default = TRUE");
+                unsetStmt.setInt(1, customerId);
+                unsetStmt.setInt(2, address.getId());
+                unsetStmt.executeUpdate();
             }
             String sql = "UPDATE customer_addresses SET " +
                          "region_id = ?, province_id = ?, municipality_id = ?, barangay_id = ?, " +
                          "street_address = ?, is_default = ?, recipient_name = ?, phone = ? " +
                          "WHERE id = ? AND customer_id = ?";
-            try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-                stmt.setString(1, address.getRegionId());
-                stmt.setString(2, address.getProvinceId());
-                stmt.setString(3, address.getMunicipalityId());
-                stmt.setString(4, address.getBarangayId());
-                stmt.setString(5, address.getStreetAddress());
-                stmt.setBoolean(6, address.isDefault());
-                stmt.setString(7, address.getRecipientName());
-                stmt.setString(8, address.getPhone());
-                stmt.setInt(9, address.getId());
-                stmt.setInt(10, customerId);
-                int rowsAffected = stmt.executeUpdate();
-                if (rowsAffected > 0) {
-                    conn.commit(); success = true;
-                    System.out.println("[AddressManager DEBUG] Successfully updated address ID: " + address.getId());
-                } else {
-                    conn.rollback();
-                     System.err.println("[AddressManager WARNING] Update failed or address not found for ID: " + address.getId());
-                }
-            } catch (SQLException ex) {
-                conn.rollback(); throw ex;
+            stmt = conn.prepareStatement(sql);
+            stmt.setString(1, address.getRegionId());
+            stmt.setString(2, address.getProvinceId());
+            stmt.setString(3, address.getMunicipalityId());
+            stmt.setString(4, address.getBarangayId());
+            stmt.setString(5, address.getStreetAddress());
+            stmt.setBoolean(6, address.isDefault());
+            stmt.setString(7, address.getRecipientName());
+            stmt.setString(8, address.getPhone());
+            stmt.setInt(9, address.getId());
+            stmt.setInt(10, customerId);
+            int rowsAffected = stmt.executeUpdate();
+            if (rowsAffected > 0) {
+                conn.commit(); success = true;
+                System.out.println("[AddressManager DEBUG] Successfully updated address ID: " + address.getId());
+            } else {
+                conn.rollback();
+                 System.err.println("[AddressManager WARNING] Update failed or address not found for ID: " + address.getId());
             }
         } catch (SQLException ex) {
+             if (conn != null) {
+                 try { conn.rollback(); } catch (SQLException e) { e.printStackTrace(); }
+             }
             handleSqlError("Error updating address ID " + address.getId(), ex);
         } finally {
-            closeDbConnection(conn);
+             try { if (unsetStmt != null) unsetStmt.close(); } catch (SQLException ignored) {}
+             try { if (stmt != null) stmt.close(); } catch (SQLException ignored) {}
+            closeDbConnection(conn); // Handles setAutoCommit(true) and close()
         }
         return success;
     }
 
     private boolean deleteAddressFromDatabase(int addressId) {
         Connection conn = null;
+        PreparedStatement stmt = null;
         boolean success = false;
         try {
             conn = DBConnection.connect();
+             if (conn == null) throw new SQLException("DB Connection failed");
             String sql = "DELETE FROM customer_addresses WHERE id = ? AND customer_id = ?";
-            try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-                stmt.setInt(1, addressId);
-                stmt.setInt(2, customerId);
-                int rowsAffected = stmt.executeUpdate();
-                if (rowsAffected > 0) {
-                    success = true;
-                    System.out.println("[AddressManager DEBUG] Successfully deleted address ID: " + addressId);
-                } else {
-                    System.err.println("[AddressManager WARNING] Delete failed or address not found for ID: " + addressId + " and customer ID: " + customerId);
-                }
+            stmt = conn.prepareStatement(sql);
+            stmt.setInt(1, addressId);
+            stmt.setInt(2, customerId);
+            int rowsAffected = stmt.executeUpdate();
+            if (rowsAffected > 0) {
+                success = true;
+                System.out.println("[AddressManager DEBUG] Successfully deleted address ID: " + addressId);
+            } else {
+                System.err.println("[AddressManager WARNING] Delete failed or address not found for ID: " + addressId + " and customer ID: " + customerId);
             }
         } catch (SQLException ex) {
             handleSqlError("Error deleting address ID " + addressId, ex);
         } finally {
-            closeDbConnection(conn); // Close non-transactional connection
+             try { if (stmt != null) stmt.close(); } catch (SQLException ignored) {}
+            closeDbConnection(conn); // Use helper to close connection
         }
         return success;
     }
 
     // --- Geographic Data Loading Methods ---
-     public List<Region> getAllRegions() { /* ... as before ... */
+     public List<Region> getAllRegions() {
          List<Region> regions = new ArrayList<>();
+         String sql = "SELECT region_id, region_name FROM table_region WHERE region_id != 'region_id' ORDER BY region_name";
          try (Connection conn = DBConnection.connect();
               Statement stmt = conn.createStatement();
-              ResultSet rs = stmt.executeQuery("SELECT region_id, region_name FROM table_region WHERE region_id != 'region_id' ORDER BY region_name")) {
+              ResultSet rs = stmt.executeQuery(sql)) {
              while (rs.next()) { regions.add(new Region(rs.getString("region_id"), rs.getString("region_name"))); }
          } catch (SQLException ex) { System.err.println("[AddressManager ERROR] loading regions: " + ex.getMessage()); ex.printStackTrace(); }
          return regions;
      }
-     public List<Province> getProvincesByRegion(String regionId) { /* ... as before ... */
+     public List<Province> getProvincesByRegion(String regionId) {
          List<Province> provinces = new ArrayList<>();
+          String sql = "SELECT province_id, province_name FROM table_province WHERE region_id = ? AND province_id != 'province_id' ORDER BY province_name";
          try (Connection conn = DBConnection.connect();
-              PreparedStatement stmt = conn.prepareStatement("SELECT province_id, province_name FROM table_province WHERE region_id = ? AND province_id != 'province_id' ORDER BY province_name")) {
-             stmt.setString(1, regionId); ResultSet rs = stmt.executeQuery();
+              PreparedStatement stmt = conn.prepareStatement(sql)) {
+             stmt.setString(1, regionId);
+             ResultSet rs = stmt.executeQuery();
              while (rs.next()) { provinces.add(new Province(rs.getString("province_id"), rs.getString("province_name"))); }
          } catch (SQLException ex) { System.err.println("[AddressManager ERROR] loading provinces for region " + regionId + ": " + ex.getMessage()); ex.printStackTrace(); }
          return provinces;
      }
-     public List<Municipality> getCitiesByProvince(String provinceId) { /* ... as before ... */
+     public List<Municipality> getCitiesByProvince(String provinceId) {
          List<Municipality> cities = new ArrayList<>();
+         String sql = "SELECT municipality_id, municipality_name FROM table_municipality WHERE province_id = ? AND municipality_id != 'municipality_id' ORDER BY municipality_name";
          try (Connection conn = DBConnection.connect();
-              PreparedStatement stmt = conn.prepareStatement("SELECT municipality_id, municipality_name FROM table_municipality WHERE province_id = ? AND municipality_id != 'municipality_id' ORDER BY municipality_name")) {
-             stmt.setString(1, provinceId); ResultSet rs = stmt.executeQuery();
+              PreparedStatement stmt = conn.prepareStatement(sql)) {
+             stmt.setString(1, provinceId);
+             ResultSet rs = stmt.executeQuery();
              while (rs.next()) { cities.add(new Municipality(rs.getString("municipality_id"), rs.getString("municipality_name"))); }
          } catch (SQLException ex) { System.err.println("[AddressManager ERROR] loading cities for province " + provinceId + ": " + ex.getMessage()); ex.printStackTrace(); }
          return cities;
      }
-     public List<Barangay> getBarangaysByCity(String cityId) { /* ... as before ... */
+     public List<Barangay> getBarangaysByCity(String cityId) {
          List<Barangay> barangays = new ArrayList<>();
+         String sql = "SELECT barangay_id, barangay_name FROM table_barangay WHERE municipality_id = ? AND barangay_id != 'barangay_id' ORDER BY barangay_name";
          try (Connection conn = DBConnection.connect();
-              PreparedStatement stmt = conn.prepareStatement("SELECT barangay_id, barangay_name FROM table_barangay WHERE municipality_id = ? AND barangay_id != 'barangay_id' ORDER BY barangay_name")) {
-             stmt.setString(1, cityId); ResultSet rs = stmt.executeQuery();
+              PreparedStatement stmt = conn.prepareStatement(sql)) {
+             stmt.setString(1, cityId);
+             ResultSet rs = stmt.executeQuery();
              while (rs.next()) { barangays.add(new Barangay(rs.getString("barangay_id"), rs.getString("barangay_name"))); }
          } catch (SQLException ex) { System.err.println("[AddressManager ERROR] loading barangays for city " + cityId + ": " + ex.getMessage()); ex.printStackTrace(); }
          return barangays;
      }
 
     // --- Helper classes for geographic entities ---
-    public static class Region { /* ... */ String id, name; public Region(String i, String n){id=i;name=n;} public String getId(){return id;} public String getName(){return name;} @Override public String toString(){return name;} }
-    public static class Province { /* ... */ String id, name; public Province(String i, String n){id=i;name=n;} public String getId(){return id;} public String getName(){return name;} @Override public String toString(){return name;} }
-    public static class Municipality { /* ... */ String id, name; public Municipality(String i, String n){id=i;name=n;} public String getId(){return id;} public String getName(){return name;} @Override public String toString(){return name;} }
-    public static class Barangay { /* ... */ String id, name; public Barangay(String i, String n){id=i;name=n;} public String getId(){return id;} public String getName(){return name;} @Override public String toString(){return name;} }
+    public static class Region { String id, name; public Region(String i, String n){id=i;name=n;} public String getId(){return id;} public String getName(){return name;} @Override public String toString(){return name;} }
+    public static class Province { String id, name; public Province(String i, String n){id=i;name=n;} public String getId(){return id;} public String getName(){return name;} @Override public String toString(){return name;} }
+    public static class Municipality { String id, name; public Municipality(String i, String n){id=i;name=n;} public String getId(){return id;} public String getName(){return name;} @Override public String toString(){return name;} }
+    public static class Barangay { String id, name; public Barangay(String i, String n){id=i;name=n;} public String getId(){return id;} public String getName(){return name;} @Override public String toString(){return name;} }
 
 
     // --- Utility Methods ---
     private void handleSqlError(String context, SQLException ex) {
-        System.err.println("[AddressManager ERROR] " + context + ": " + ex.getMessage());
+        System.err.println("[AddressManager ERROR] " + context + ": " + ex.getMessage() + " (SQLState: " + ex.getSQLState() + ", ErrorCode: " + ex.getErrorCode() + ")");
         ex.printStackTrace();
+        // Ensure dialog shows on EDT
         SwingUtilities.invokeLater(() -> showThemedJOptionPaneStatic(customerFrame,
-            context + ". Please check logs or contact support.",
+            context + ". Please check logs or contact support.\nError: " + ex.getMessage(),
             "Database Error", JOptionPane.ERROR_MESSAGE));
     }
 
     private void closeDbConnection(Connection conn) {
         if (conn != null) {
             try {
-                if (!conn.getAutoCommit()) { // Reset auto-commit if changed
+                // Reset auto-commit only if it was changed (i.e., false)
+                if (!conn.getAutoCommit()) {
                     conn.setAutoCommit(true);
                 }
-                conn.close();
             } catch (SQLException ex) {
-                ex.printStackTrace();
+                System.err.println("[AddressManager WARNING] Error resetting auto-commit on close: " + ex.getMessage());
+            } finally {
+                 try {
+                     conn.close(); // Always attempt to close
+                 } catch (SQLException ex) {
+                      System.err.println("[AddressManager ERROR] Failed to close DB connection: " + ex.getMessage());
+                     ex.printStackTrace();
+                 }
             }
         }
     }
 
     // Static version for use outside the inner class instance if needed
      private static void showThemedJOptionPaneStatic(Component parent, String message, String title, int messageType) {
+         // UIManager settings applied in main should handle this,
+         // but setting them here again ensures the dialog is themed correctly,
+         // especially if UIManager defaults were changed elsewhere.
          UIManager.put("OptionPane.background", ThemeColors.DIALOG_BG);
          UIManager.put("Panel.background", ThemeColors.DIALOG_BG);
          UIManager.put("OptionPane.messageForeground", ThemeColors.DIALOG_FG);
-         UIManager.put("Button.background", ThemeColors.SECONDARY); // Theme button
+         UIManager.put("Button.background", ThemeColors.SECONDARY);
          UIManager.put("Button.foreground", Color.WHITE);
          JOptionPane.showMessageDialog(parent, message, title, messageType);
      }
@@ -373,7 +453,7 @@ public class AddressManager {
 
         // --- Data ---
         private List<Address> customerAddresses;
-        private Address selectedAddress;
+        private Address selectedAddress = null; // Initialize to null
 
 
         public AddressSelectionDialog(JFrame parent, List<Address> addresses) {
@@ -395,17 +475,23 @@ public class AddressManager {
             tabbedPane.addTab("Add New Address", addPanel);
             add(tabbedPane, BorderLayout.CENTER);
 
+            // Ensure UI updates happen on the Event Dispatch Thread
             SwingUtilities.invokeLater(this::postInitSetup);
         }
 
         private void postInitSetup() {
-            buildAddressListUI();
-            findAndSetInitialSelection();
-            Component scrollPane = SwingUtilities.getAncestorOfClass(JScrollPane.class, addressesPanel);
-            if (scrollPane != null) {
-                scrollPane.revalidate(); scrollPane.repaint();
+            buildAddressListUI(); // Build the list content
+            findAndSetInitialSelection(); // Set the default selection
+             // Trigger layout update for the scroll pane containing the addresses
+            Container scrollPane = SwingUtilities.getAncestorOfClass(JScrollPane.class, addressesPanel);
+            if (scrollPane instanceof JScrollPane) {
+                ((JScrollPane) scrollPane).getViewport().setViewPosition(new Point(0,0)); // Scroll to top
+                scrollPane.revalidate();
+                scrollPane.repaint();
             } else {
-                addressesPanel.revalidate(); addressesPanel.repaint();
+                // Fallback if scrollpane isn't found directly
+                addressesPanel.revalidate();
+                addressesPanel.repaint();
             }
         }
 
@@ -418,11 +504,13 @@ public class AddressManager {
             addressesPanel.setLayout(new BoxLayout(addressesPanel, BoxLayout.Y_AXIS));
             addressesPanel.setBackground(ThemeColors.BACKGROUND);
 
+            // Wrap addressesPanel in another panel ONLY if necessary for layout purposes.
+            // Using BorderLayout.NORTH helps keep items packed at the top.
             JPanel addressListWrapper = new JPanel(new BorderLayout());
             addressListWrapper.setBackground(ThemeColors.BACKGROUND);
             addressListWrapper.add(addressesPanel, BorderLayout.NORTH);
 
-            JScrollPane scrollPane = new JScrollPane(addressListWrapper);
+            JScrollPane scrollPane = new JScrollPane(addressListWrapper); // Scroll the wrapper
             scrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
             scrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
             scrollPane.setBorder(new LineBorder(ThemeColors.SECONDARY));
@@ -432,12 +520,15 @@ public class AddressManager {
 
             selectButton = createStyledButton("Use Selected Address", ThemeColors.PRIMARY);
             selectButton.addActionListener(e -> {
+                // The selectedAddress is updated by the radio button listeners
                 if (selectedAddress != null) {
-                    dispose();
+                    dispose(); // Close the dialog
                 } else {
                     showThemedJOptionPane("Please select an address.", "No Address Selected", JOptionPane.WARNING_MESSAGE);
                 }
             });
+             // Disable initially if no address is selected
+             selectButton.setEnabled(selectedAddress != null);
 
             JPanel buttonPanel = createButtonPanel();
             buttonPanel.add(selectButton);
@@ -448,19 +539,27 @@ public class AddressManager {
 
         private void buildAddressListUI() {
             if (!SwingUtilities.isEventDispatchThread()) {
-                SwingUtilities.invokeLater(this::buildAddressListUI); return;
+                SwingUtilities.invokeLater(this::buildAddressListUI);
+                return;
             }
             System.out.println("[AddressManager DEBUG] buildAddressListUI started. Address count: " + customerAddresses.size());
 
-            addressesPanel.removeAll();
-            addressGroup = new ButtonGroup();
-            addressRadioMap.clear();
+            addressesPanel.removeAll(); // Clear previous items
+            addressGroup = new ButtonGroup(); // New group for new radio buttons
+            addressRadioMap.clear(); // Clear the map
 
             if (customerAddresses.isEmpty()) {
                 JLabel noAddressLabel = new JLabel("No saved addresses. Please add one in the 'Add New Address' tab.");
-                noAddressLabel.setForeground(ThemeColors.TEXT); noAddressLabel.setHorizontalAlignment(SwingConstants.CENTER);
-                addressesPanel.add(noAddressLabel);
+                noAddressLabel.setForeground(ThemeColors.TEXT);
+                noAddressLabel.setHorizontalAlignment(SwingConstants.CENTER);
+                // Center the label if it's the only component
+                addressesPanel.setLayout(new BorderLayout());
+                addressesPanel.add(noAddressLabel, BorderLayout.CENTER);
             } else {
+                 // Reset layout manager if it was changed for the empty message
+                 if (!(addressesPanel.getLayout() instanceof BoxLayout)) {
+                     addressesPanel.setLayout(new BoxLayout(addressesPanel, BoxLayout.Y_AXIS));
+                 }
                 for (Address address : customerAddresses) {
                     try {
                         JPanel addressCard = createAddressCard(address);
@@ -469,18 +568,37 @@ public class AddressManager {
                             addressRadioMap.put(address.getId(), radio);
                             addressGroup.add(radio);
                             final Address currentAddress = address; // Capture for listener
-                            radio.addActionListener(e -> selectedAddress = currentAddress);
-                        } else { System.err.println("[AddressManager WARNING] Radio button not found for ID: " + address.getId()); }
+                             // Update selectedAddress and enable button when a radio is clicked
+                             radio.addActionListener(e -> {
+                                selectedAddress = currentAddress;
+                                selectButton.setEnabled(true); // Enable the 'Use' button
+                             });
+                        } else {
+                            System.err.println("[AddressManager WARNING] Radio button not found for ID: " + address.getId());
+                        }
                         addressesPanel.add(addressCard);
-                        addressesPanel.add(Box.createRigidArea(new Dimension(0, 10)));
+                        addressesPanel.add(Box.createRigidArea(new Dimension(0, 10))); // Spacer
                     } catch (Exception e) {
                          System.err.printf("[AddressManager ERROR] creating address card for ID %d: %s%n", address.getId(), e.getMessage());
                          e.printStackTrace();
-                         // Optionally add an error placeholder card
                     }
                 }
             }
             System.out.println("[AddressManager DEBUG] buildAddressListUI finished. Map size: " + addressRadioMap.size());
+
+            // Revalidate and repaint after modifying components
+            addressesPanel.revalidate();
+            addressesPanel.repaint();
+            Container parent = addressesPanel.getParent();
+            if (parent instanceof JComponent) {
+                ((JComponent) parent).revalidate();
+                ((JComponent) parent).repaint();
+            }
+             Container scrollParent = SwingUtilities.getAncestorOfClass(JScrollPane.class, addressesPanel);
+             if (scrollParent instanceof JScrollPane) {
+                  ((JScrollPane)scrollParent).revalidate();
+                  ((JScrollPane)scrollParent).repaint();
+             }
         }
 
         private JRadioButton findRadioButton(Container container) {
@@ -493,61 +611,48 @@ public class AddressManager {
             } return null;
         }
 
-        // UPDATED createAddressCard Method
         private JPanel createAddressCard(Address address) {
             JPanel cardPanel = new JPanel(new BorderLayout(10, 10));
             cardPanel.setBackground(ThemeColors.CARD_BG);
             Border line = new LineBorder(ThemeColors.SECONDARY);
             Border padding = new EmptyBorder(10, 10, 10, 10);
             cardPanel.setBorder(new CompoundBorder(line, padding));
-            // Slightly adjusted height to better accommodate potentially smaller buttons
-            cardPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 135)); // Adjust if needed
+            cardPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 135)); // Constraint height
 
             JRadioButton radio = new JRadioButton();
             styleRadioButton(radio);
-            // Keep the radio button vertically centered if possible
-            JPanel radioWrapper = new JPanel(new GridBagLayout());
+            JPanel radioWrapper = new JPanel(new GridBagLayout()); // To center radio vertically
             radioWrapper.setOpaque(false);
             radioWrapper.add(radio);
             cardPanel.add(radioWrapper, BorderLayout.WEST);
 
-            JLabel addressLabel = new JLabel("<html><body style='width: 380px;'>" + // Adjust width if needed
+            // Using HTML for basic formatting and line breaks
+            JLabel addressLabel = new JLabel("<html><body style='width: 380px;'>" + // Constrain width for wrapping
                 (address.isDefault() ? "<b style='color:" + colorToHex(ThemeColors.PRIMARY) + ";'>Default Address</b><br>" : "") +
                 address.getFullAddressForDisplay() + "</body></html>");
             addressLabel.setForeground(ThemeColors.TEXT);
-            addressLabel.setVerticalAlignment(SwingConstants.TOP);
+            addressLabel.setVerticalAlignment(SwingConstants.TOP); // Align text to top
             cardPanel.add(addressLabel, BorderLayout.CENTER);
 
             JPanel buttonsPanel = new JPanel();
             buttonsPanel.setLayout(new BoxLayout(buttonsPanel, BoxLayout.Y_AXIS));
             buttonsPanel.setOpaque(false);
-            // buttonsPanel.setAlignmentY(Component.CENTER_ALIGNMENT); // Try centering the button panel itself
 
-            // Create buttons using the standard style first
             JButton editButton = createStyledButton("Edit", ThemeColors.SECONDARY);
-            JButton deleteButton = createStyledButton("Delete", new Color(180, 40, 40)); // Keep distinct delete color
+            JButton deleteButton = createStyledButton("Delete", new Color(180, 40, 40)); // Distinct delete color
 
-            // --- START: Button Size Fix ---
-            // 1. Define a smaller border specifically for these buttons
-            Border smallButtonBorder = new EmptyBorder(5, 15, 5, 15); // Reduced padding
+            // Button Size Consistency Fix
+            Border smallButtonBorder = new EmptyBorder(5, 15, 5, 15);
             editButton.setBorder(smallButtonBorder);
             deleteButton.setBorder(smallButtonBorder);
-
-            // 2. Calculate the preferred size based on the *wider* button to ensure they match
             Dimension editPref = editButton.getPreferredSize();
             Dimension deletePref = deleteButton.getPreferredSize();
             int maxWidth = Math.max(editPref.width, deletePref.width);
-            // Use the calculated max width and a consistent height (e.g., edit button's height)
             Dimension uniformSize = new Dimension(maxWidth, editPref.height);
-
-            // 3. Set Preferred and Maximum size to enforce uniformity and prevent stretching
             editButton.setPreferredSize(uniformSize);
-            editButton.setMaximumSize(uniformSize); // Prevent BoxLayout from stretching it wider
+            editButton.setMaximumSize(uniformSize);
             deleteButton.setPreferredSize(uniformSize);
-            deleteButton.setMaximumSize(uniformSize); // Prevent BoxLayout from stretching it wider
-            // --- END: Button Size Fix ---
-
-            // Ensure buttons are centered within the buttonsPanel
+            deleteButton.setMaximumSize(uniformSize);
             editButton.setAlignmentX(Component.CENTER_ALIGNMENT);
             deleteButton.setAlignmentX(Component.CENTER_ALIGNMENT);
 
@@ -555,11 +660,11 @@ public class AddressManager {
             editButton.addActionListener(e -> showEditAddressDialog(addressRef));
             deleteButton.addActionListener(e -> handleDeleteAddress(addressRef));
 
-            buttonsPanel.add(Box.createVerticalGlue()); // Pushes buttons towards the center
+            buttonsPanel.add(Box.createVerticalGlue()); // Push buttons to center
             buttonsPanel.add(editButton);
-            buttonsPanel.add(Box.createRigidArea(new Dimension(0, 5))); // Space between buttons
+            buttonsPanel.add(Box.createRigidArea(new Dimension(0, 5)));
             buttonsPanel.add(deleteButton);
-            buttonsPanel.add(Box.createVerticalGlue()); // Pushes buttons towards the center
+            buttonsPanel.add(Box.createVerticalGlue()); // Push buttons to center
 
             cardPanel.add(buttonsPanel, BorderLayout.EAST);
 
@@ -567,7 +672,7 @@ public class AddressManager {
         }
 
 
-         private static class RadioButtonIcon implements Icon { /* ... as before ... */
+         private static class RadioButtonIcon implements Icon {
              private final boolean selected; private static final int DIAMETER = 16;
              public RadioButtonIcon(boolean selected) { this.selected = selected; }
              @Override public void paintIcon(Component c, Graphics g, int x, int y) {
@@ -576,10 +681,11 @@ public class AddressManager {
                  if (selected) { g2.setColor(ThemeColors.PRIMARY); int innerDiameter = DIAMETER / 2; g2.fillOval(x + (DIAMETER - innerDiameter) / 2, y + (DIAMETER - innerDiameter) / 2, innerDiameter, innerDiameter); }
                  g2.dispose();
              }
-             @Override public int getIconWidth() { return DIAMETER + 4; } @Override public int getIconHeight() { return DIAMETER + 4; }
+             @Override public int getIconWidth() { return DIAMETER + 4; }
+             @Override public int getIconHeight() { return DIAMETER + 4; }
          }
 
-        // --- Create Add Panel (includes Name and Phone fields) ---
+        // --- Create Add Panel ---
         private JPanel createAddPanel() {
             JPanel panel = new JPanel(new BorderLayout()); panel.setBackground(ThemeColors.BACKGROUND);
             JPanel formPanel = new JPanel(new GridBagLayout()); formPanel.setBackground(ThemeColors.BACKGROUND); formPanel.setBorder(new EmptyBorder(10, 10, 10, 10));
@@ -624,7 +730,7 @@ public class AddressManager {
         private void updateAddBarangays(JComboBox<Municipality> m, JComboBox<Barangay> b) { Municipality s = (Municipality) m.getSelectedItem(); b.removeAllItems(); b.addItem(new Barangay("-1", "-- Select Barangay --")); if (s != null && !s.getId().equals("-1")) { getBarangaysByCity(s.getId()).forEach(b::addItem); b.setEnabled(true); } else { b.setEnabled(false); } }
 
 
-        // --- Save New Address (uses fields passed from Add Panel) ---
+        // --- Save New Address ---
         private void saveNewAddress(JTextField nameFld, JTextField phoneFld, JComboBox<Region> rCombo, JComboBox<Province> pCombo,
                                    JComboBox<Municipality> mCombo, JComboBox<Barangay> bCombo, JTextField streetFld, JRadioButton defaultRadioBtn) {
             String recipientName = nameFld.getText().trim(); String phone = phoneFld.getText().trim();
@@ -643,22 +749,39 @@ public class AddressManager {
                 showThemedJOptionPane("Address saved successfully!", "Success", JOptionPane.INFORMATION_MESSAGE);
                 refreshAddressSelectionPanel();
                 resetAddAddressForm(nameFld, phoneFld, rCombo, streetFld, defaultRadioBtn);
-                Component parentComponent = this.getContentPane().getComponent(0); if (parentComponent instanceof JTabbedPane) { ((JTabbedPane) parentComponent).setSelectedIndex(0); }
+                // Switch back to the selection tab after adding
+                Container parent = getParent();
+                 while(parent != null && !(parent instanceof JDialog)) {
+                    parent = parent.getParent();
+                 }
+                 if (parent instanceof JDialog) {
+                     Component content = ((JDialog)parent).getContentPane().getComponent(0);
+                     if (content instanceof JTabbedPane) {
+                        ((JTabbedPane)content).setSelectedIndex(0);
+                     }
+                 }
             });
         }
 
         private void resetAddAddressForm(JTextField nameFld, JTextField phoneFld, JComboBox<Region> rCombo, JTextField streetFld, JRadioButton defaultRadioBtn) {
-            SwingUtilities.invokeLater(() -> { nameFld.setText(""); phoneFld.setText(""); rCombo.setSelectedIndex(0); streetFld.setText(""); defaultRadioBtn.setSelected(false); });
+            SwingUtilities.invokeLater(() -> { nameFld.setText(""); phoneFld.setText(""); rCombo.setSelectedIndex(0); /* Dropdowns linked to region will reset automatically */ streetFld.setText(""); defaultRadioBtn.setSelected(false); });
         }
 
         // --- Handle Delete Address Action ---
         private void handleDeleteAddress(Address addressToDelete) {
-             UIManager.put("OptionPane.background", ThemeColors.DIALOG_BG); UIManager.put("Panel.background", ThemeColors.DIALOG_BG); UIManager.put("OptionPane.messageForeground", ThemeColors.DIALOG_FG);
-             UIManager.put("Button.background", ThemeColors.SECONDARY); UIManager.put("Button.foreground", Color.WHITE);
+             // Set UIManager properties specifically for this JOptionPane instance
+             UIManager.put("OptionPane.background", ThemeColors.DIALOG_BG);
+             UIManager.put("Panel.background", ThemeColors.DIALOG_BG);
+             UIManager.put("OptionPane.messageForeground", ThemeColors.DIALOG_FG);
+             UIManager.put("Button.background", ThemeColors.SECONDARY);
+             UIManager.put("Button.foreground", Color.WHITE);
 
             int confirmation = JOptionPane.showConfirmDialog( this,
                 "Are you sure you want to delete this address?\n" + addressToDelete.getFullAddressForDisplay().replaceAll("<br>", "\n").replaceAll("<.?b>", ""), // Clean HTML for display
                 "Confirm Deletion", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+
+            // Reset UIManager properties if necessary (usually not required if set globally)
+            // UIManager.put("OptionPane.background", originalBg); // Example
 
             if (confirmation == JOptionPane.YES_OPTION) {
                 boolean deleteSuccess = deleteAddressFromDatabase(addressToDelete.getId());
@@ -670,55 +793,52 @@ public class AddressManager {
             }
         }
 
-        // --- refreshAddressSelectionPanel (includes revalidation) ---
+        // --- refreshAddressSelectionPanel ---
         private void refreshAddressSelectionPanel() {
-             customerAddresses = getCustomerAddresses();
-             buildAddressListUI(); // Rebuild first
+             customerAddresses = getCustomerAddresses(); // Reload data
+             buildAddressListUI(); // Rebuild the UI components
+             findAndSetInitialSelection(); // Reset the selection (usually to default or none)
 
-             SwingUtilities.invokeLater(() -> { // Then revalidate and select on EDT
-                 System.out.println("[AddressManager DEBUG] Starting EDT task for revalidation and selection.");
-                 try {
-                     addressesPanel.revalidate(); addressesPanel.repaint();
-                     System.out.println("[AddressManager DEBUG] Revalidated addressesPanel.");
-                     JScrollPane scrollPaneAncestor = (JScrollPane) SwingUtilities.getAncestorOfClass(JScrollPane.class, addressesPanel);
-                     if (scrollPaneAncestor != null) {
-                         scrollPaneAncestor.revalidate(); scrollPaneAncestor.repaint();
-                         System.out.println("[AddressManager DEBUG] Revalidated ancestor JScrollPane.");
-                         JViewport viewport = scrollPaneAncestor.getViewport();
-                         if (viewport != null) {
-                             Component view = viewport.getView(); if (view != null) { view.revalidate(); view.repaint(); System.out.println("[AddressManager DEBUG] Revalidated viewport's view component."); }
-                             viewport.revalidate(); viewport.repaint(); System.out.println("[AddressManager DEBUG] Revalidated JScrollPane viewport.");
-                         } else { System.out.println("[AddressManager DEBUG] Scroll pane's viewport is null."); }
-                     } else {
-                         System.err.println("[AddressManager WARNING] Could not find ancestor JScrollPane to revalidate!");
-                         Container contentPane = AddressSelectionDialog.this.getContentPane();
-                         if (contentPane instanceof JComponent) { ((JComponent) contentPane).revalidate(); ((JComponent) contentPane).repaint(); System.out.println("[AddressManager DEBUG] Revalidated dialog content pane as fallback."); }
-                         else { AddressSelectionDialog.this.revalidate(); AddressSelectionDialog.this.repaint(); System.out.println("[AddressManager DEBUG] Revalidated dialog itself as ultimate fallback."); }
-                     }
-                     findAndSetInitialSelection();
-                     System.out.println("[AddressManager DEBUG] Called findAndSetInitialSelection.");
-                 } catch (Exception e) { System.err.println("[AddressManager ERROR] Exception during EDT refresh task: " + e.getMessage()); e.printStackTrace(); }
-                  System.out.println("[AddressManager DEBUG] Finished EDT task for revalidation and selection.");
-             });
+             // Revalidate the container holding the address cards
+             addressesPanel.revalidate();
+             addressesPanel.repaint();
+             // Revalidate the scroll pane ancestor
+             Container scrollPane = SwingUtilities.getAncestorOfClass(JScrollPane.class, addressesPanel);
+             if (scrollPane != null) {
+                 scrollPane.revalidate();
+                 scrollPane.repaint();
+                 // Scroll to top after refresh
+                 ((JScrollPane) scrollPane).getViewport().setViewPosition(new Point(0,0));
+             }
          }
 
 
-        // --- findAndSetInitialSelection (selects default radio) ---
+        // --- findAndSetInitialSelection ---
         private void findAndSetInitialSelection() {
             if (!SwingUtilities.isEventDispatchThread()) { SwingUtilities.invokeLater(this::findAndSetInitialSelection); return; }
             System.out.println("[AddressManager DEBUG] findAndSetInitialSelection started.");
 
-            selectedAddress = null; Address defaultAddr = null;
+            selectedAddress = null; // Reset selected address
+            Address defaultAddr = null;
             for (Address addr : customerAddresses) { if (addr.isDefault()) { defaultAddr = addr; break; } }
-            selectedAddress = defaultAddr;
 
-            if (selectedAddress != null) {
-                JRadioButton defaultRadio = addressRadioMap.get(selectedAddress.getId());
-                if (defaultRadio != null) {
-                    if (!defaultRadio.isSelected()) { defaultRadio.setSelected(true); System.out.println("[AddressManager DEBUG] Default radio for ID " + selectedAddress.getId() + " selected via map."); }
-                    else { System.out.println("[AddressManager DEBUG] Default radio for ID " + selectedAddress.getId() + " was already selected."); }
-                } else { System.err.println("[AddressManager WARNING] Could not find radio button in map for default ID: " + selectedAddress.getId()); }
-            } else { if (addressGroup != null) { addressGroup.clearSelection(); } System.out.println("[AddressManager DEBUG] No default address found, cleared selection."); }
+            if (defaultAddr != null) {
+                 selectedAddress = defaultAddr; // Set selected to default
+                 JRadioButton defaultRadio = addressRadioMap.get(defaultAddr.getId());
+                 if (defaultRadio != null) {
+                    defaultRadio.setSelected(true); // Select the radio button
+                    System.out.println("[AddressManager DEBUG] Default radio for ID " + defaultAddr.getId() + " selected.");
+                    selectButton.setEnabled(true); // Enable the 'Use' button
+                 } else {
+                    System.err.println("[AddressManager WARNING] Could not find radio button in map for default ID: " + defaultAddr.getId());
+                     if(addressGroup != null) addressGroup.clearSelection(); // Clear if radio not found
+                    selectButton.setEnabled(false); // Disable if default can't be selected
+                 }
+            } else {
+                 if(addressGroup != null) addressGroup.clearSelection(); // No default, clear selection
+                 System.out.println("[AddressManager DEBUG] No default address found, cleared selection.");
+                 selectButton.setEnabled(false); // Disable button if no default selected
+            }
             System.out.println("[AddressManager DEBUG] findAndSetInitialSelection finished. Selected ID: " + (selectedAddress != null ? selectedAddress.getId() : "null"));
         }
 
@@ -744,8 +864,10 @@ public class AddressManager {
 
 
             editRecipientNameField.setText(addressToEdit.getRecipientName()); editPhoneField.setText(addressToEdit.getPhone()); editStreetAddressField.setText(addressToEdit.getStreetAddress()); editDefaultAddressRadio.setSelected(addressToEdit.isDefault());
-            populateEditDropdowns(addressToEdit, editRegionCombo, editProvinceCombo, editCityCombo, editBarangayCombo);
             addEditDropdownListeners(editRegionCombo, editProvinceCombo, editCityCombo, editBarangayCombo);
+            // Populate dropdowns *after* adding listeners to ensure correct cascading load
+            populateEditDropdowns(addressToEdit, editRegionCombo, editProvinceCombo, editCityCombo, editBarangayCombo);
+
 
             JButton updateButton = createStyledButton("Update Address", ThemeColors.PRIMARY);
             updateButton.addActionListener(e -> {
@@ -765,29 +887,33 @@ public class AddressManager {
             editDialog.setVisible(true);
         }
 
-        // --- Edit Dropdown Listeners/Updaters (reuse Add logic) ---
+        // --- Edit Dropdown Listeners/Updaters ---
         private void addEditDropdownListeners(JComboBox<Region> r, JComboBox<Province> p, JComboBox<Municipality> m, JComboBox<Barangay> b) { addAddDropdownListeners(r, p, m, b); }
-        private void updateEditProvinces(JComboBox<Region> r, JComboBox<Province> p, JComboBox<Municipality> m, JComboBox<Barangay> b) { updateAddProvinces(r, p, m, b); }
-        private void updateEditCities(JComboBox<Province> p, JComboBox<Municipality> m, JComboBox<Barangay> b) { updateAddCities(p, m, b); }
-        private void updateEditBarangays(JComboBox<Municipality> m, JComboBox<Barangay> b) { updateAddBarangays(m, b); }
+        // updateEditProvinces, updateEditCities, updateEditBarangays reuse the Add panel logic
 
          // --- Populate Edit Dropdowns ---
         private void populateEditDropdowns(Address addr, JComboBox<Region> rCombo, JComboBox<Province> pCombo, JComboBox<Municipality> mCombo, JComboBox<Barangay> bCombo) {
-            // Populate Region and Select
-             rCombo.removeAllItems(); rCombo.addItem(new Region("-1", "-- Select Region --")); getAllRegions().forEach(rCombo::addItem);
-             selectComboBoxItemById(rCombo, addr.getRegionId());
+             rCombo.removeAllItems(); rCombo.addItem(new Region("-1", "-- Select Region --"));
+             List<Region> regions = getAllRegions();
+             regions.forEach(rCombo::addItem);
+             selectComboBoxItemById(rCombo, addr.getRegionId()); // Select the current region
 
-            // Populate Province and Select (wait for listener or force update)
-            // updateEditProvinces has already been called implicitly by selecting region
-             if (pCombo.getItemCount() <= 1) updateEditProvinces(rCombo, pCombo, mCombo, bCombo); // Force if listener didn't fire/finish
+             // Trigger cascade after selection (or manually if needed)
+              // Selection should trigger the listener added in addEditDropdownListeners
+              // If selection happens before listener attachment, manually call update:
+              if (pCombo.getItemCount() <= 1 && rCombo.getSelectedIndex() > 0) {
+                  updateAddProvinces(rCombo, pCombo, mCombo, bCombo);
+              }
              selectComboBoxItemById(pCombo, addr.getProvinceId());
 
-            // Populate City and Select
-             if (mCombo.getItemCount() <= 1) updateEditCities(pCombo, mCombo, bCombo);
+             if (mCombo.getItemCount() <= 1 && pCombo.getSelectedIndex() > 0) {
+                  updateAddCities(pCombo, mCombo, bCombo);
+              }
              selectComboBoxItemById(mCombo, addr.getMunicipalityId());
 
-            // Populate Barangay and Select
-             if (bCombo.getItemCount() <= 1) updateEditBarangays(mCombo, bCombo);
+             if (bCombo.getItemCount() <= 1 && mCombo.getSelectedIndex() > 0) {
+                  updateAddBarangays(mCombo, bCombo);
+              }
              selectComboBoxItemById(bCombo, addr.getBarangayId());
          }
 
@@ -815,7 +941,10 @@ public class AddressManager {
         private String colorToHex(Color c) { return String.format("#%02x%02x%02x", c.getRed(), c.getGreen(), c.getBlue()); }
         private void styleTabbedPane(JTabbedPane tp) { tp.setBackground(ThemeColors.BACKGROUND); tp.setForeground(ThemeColors.TEXT); UIManager.put("TabbedPane.selectedForeground", ThemeColors.PRIMARY); UIManager.put("TabbedPane.foreground", ThemeColors.TEXT); UIManager.put("TabbedPane.contentAreaColor", ThemeColors.BACKGROUND); UIManager.put("TabbedPane.selectedBackground", ThemeColors.CARD_BG); UIManager.put("TabbedPane.unselectedBackground", ThemeColors.BACKGROUND); UIManager.put("TabbedPane.borderHightlightColor", ThemeColors.SECONDARY); UIManager.put("TabbedPane.darkShadow", ThemeColors.BACKGROUND); UIManager.put("TabbedPane.light", ThemeColors.BACKGROUND); UIManager.put("TabbedPane.shadow", ThemeColors.BACKGROUND); }
         private void styleScrollPane(JScrollPane sp) { sp.getVerticalScrollBar().setUnitIncrement(16); JScrollBar vsb = sp.getVerticalScrollBar(); vsb.setUI(new javax.swing.plaf.basic.BasicScrollBarUI() { @Override protected void configureScrollBarColors() { thumbColor = ThemeColors.PRIMARY; trackColor = ThemeColors.CARD_BG; } @Override protected JButton createDecreaseButton(int o) { return createZeroButton(); } @Override protected JButton createIncreaseButton(int o) { return createZeroButton(); } private JButton createZeroButton() { JButton b = new JButton(); Dimension z = new Dimension(0, 0); b.setPreferredSize(z); b.setMinimumSize(z); b.setMaximumSize(z); return b; } }); vsb.setBackground(ThemeColors.BACKGROUND); vsb.setBorder(null); }
-        private void showThemedJOptionPane(String message, String title, int messageType) { UIManager.put("OptionPane.background", ThemeColors.DIALOG_BG); UIManager.put("Panel.background", ThemeColors.DIALOG_BG); UIManager.put("OptionPane.messageForeground", ThemeColors.DIALOG_FG); UIManager.put("Button.background", ThemeColors.SECONDARY); UIManager.put("Button.foreground", Color.WHITE); JOptionPane.showMessageDialog(this, message, title, messageType); }
+        // Modified to use the static, themed JOptionPane helper
+        private void showThemedJOptionPane(String message, String title, int messageType) {
+            AddressManager.showThemedJOptionPaneStatic(this, message, title, messageType);
+        }
 
-    }
+    } // End AddressSelectionDialog Inner Class
 }

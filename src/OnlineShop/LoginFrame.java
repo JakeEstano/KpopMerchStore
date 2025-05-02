@@ -53,16 +53,16 @@ public class LoginFrame extends JFrame {
         // Buttons
         JPanel buttonPanel = new JPanel(new GridLayout(1, 2, 20, 0));
         buttonPanel.setOpaque(false);
-        
+
         loginButton = createStyledButton("Login", ThemeColors.PRIMARY);
         loginButton.addActionListener(e -> authenticateUser());
-        
+
         registerButton = createStyledButton("Register", ThemeColors.SECONDARY);
-        registerButton.addActionListener(e -> new RegisterFrame());
-        
+        registerButton.addActionListener(e -> openRegisterFrame()); // Changed action
+
         buttonPanel.add(loginButton);
         buttonPanel.add(registerButton);
-        
+
         gbc.gridy = 4; gbc.gridx = 0; gbc.gridwidth = 2;
         add(buttonPanel, gbc);
 
@@ -89,6 +89,7 @@ public class LoginFrame extends JFrame {
         field.setFont(new Font("Arial", Font.PLAIN, 14));
         field.setBackground(ThemeColors.CARD_BG);
         field.setForeground(ThemeColors.TEXT);
+        field.setCaretColor(ThemeColors.TEXT); // Ensure caret is visible
         field.setBorder(BorderFactory.createCompoundBorder(
             BorderFactory.createLineBorder(ThemeColors.SECONDARY, 1),
             BorderFactory.createEmptyBorder(8, 8, 8, 8)
@@ -101,6 +102,7 @@ public class LoginFrame extends JFrame {
         field.setFont(new Font("Arial", Font.PLAIN, 14));
         field.setBackground(ThemeColors.CARD_BG);
         field.setForeground(ThemeColors.TEXT);
+        field.setCaretColor(ThemeColors.TEXT); // Ensure caret is visible
         field.setBorder(BorderFactory.createCompoundBorder(
             BorderFactory.createLineBorder(ThemeColors.SECONDARY, 1),
             BorderFactory.createEmptyBorder(8, 8, 8, 8)
@@ -116,52 +118,99 @@ public class LoginFrame extends JFrame {
         button.setFocusPainted(false);
         button.setBorder(BorderFactory.createEmptyBorder(10, 20, 10, 20));
         button.addMouseListener(new MouseAdapter() {
+            Color originalBg = bgColor; // Store original color correctly
             @Override
             public void mouseEntered(MouseEvent e) {
                 button.setBackground(ThemeColors.BUTTON_HOVER);
             }
             @Override
             public void mouseExited(MouseEvent e) {
-                button.setBackground(bgColor);
+                button.setBackground(originalBg); // Use stored original color
             }
         });
         return button;
     }
 
     private void authenticateUser() {
-        try (Connection conn = DBConnection.connect();
-             PreparedStatement stmt = conn.prepareStatement("SELECT id, email, password, role FROM customers WHERE email=? AND password=?")) {
+        String email = emailField.getText().trim();
+        String password = new String(passwordField.getPassword());
 
-            stmt.setString(1, emailField.getText());
-            stmt.setString(2, new String(passwordField.getPassword()));
-            ResultSet rs = stmt.executeQuery();
+        if (email.isEmpty() || password.isEmpty()) {
+             JOptionPane.showMessageDialog(this, "Please enter both email and password.", "Input Required", JOptionPane.WARNING_MESSAGE);
+             return;
+        }
+
+        Connection conn = null;
+        PreparedStatement stmt = null;
+        ResultSet rs = null;
+        try {
+            conn = DBConnection.connect(); // Use updated DBConnection
+            if (conn == null) {
+                 JOptionPane.showMessageDialog(this, "Database connection failed. Cannot log in.", "DB Error", JOptionPane.ERROR_MESSAGE);
+                 return;
+            }
+            stmt = conn.prepareStatement("SELECT id, email, password, role FROM customers WHERE email=?"); // Check only email first
+            stmt.setString(1, email);
+            rs = stmt.executeQuery();
 
             if (rs.next()) {
-                int customerId = rs.getInt("id");
-                String role = rs.getString("role");
-                JOptionPane.showMessageDialog(this, "Login Successful!");
+                // Email found, now verify password
+                String storedPassword = rs.getString("password");
+                // --- VERY BASIC Password Check ---
+                // In a real application, use hashing (e.g., BCrypt)
+                // if (BCrypt.checkpw(password, storedPassword)) { // Example using BCrypt
+                if (password.equals(storedPassword)) { // Replace with secure check
+                    int customerId = rs.getInt("id");
+                    String role = rs.getString("role");
+                    JOptionPane.showMessageDialog(this, "Login Successful!", "Success", JOptionPane.INFORMATION_MESSAGE);
 
-                if ("admin".equalsIgnoreCase(role)) {
-                    new AdminFrame();
+                    if ("admin".equalsIgnoreCase(role)) {
+                        new AdminFrame().setVisible(true); // Show admin frame
+                    } else {
+                        new CustomerFrame(customerId).setVisible(true); // Show customer frame
+                    }
+                    dispose(); // Close the login frame
                 } else {
-                    new CustomerFrame(customerId);
+                    // Password mismatch
+                    JOptionPane.showMessageDialog(this, "Invalid Credentials!", "Login Failed", JOptionPane.ERROR_MESSAGE);
                 }
-                dispose();
             } else {
-                JOptionPane.showMessageDialog(this, "Invalid Credentials!");
+                // Email not found
+                JOptionPane.showMessageDialog(this, "Invalid Credentials!", "Login Failed", JOptionPane.ERROR_MESSAGE);
             }
         } catch (SQLException e) {
             e.printStackTrace();
-            JOptionPane.showMessageDialog(this, "Database Error!", "Error", JOptionPane.ERROR_MESSAGE);
+            JOptionPane.showMessageDialog(this, "Database Error during login: " + e.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+        } finally {
+             // Ensure resources are closed
+             try { if (rs != null) rs.close(); } catch (SQLException ignored) {}
+             try { if (stmt != null) stmt.close(); } catch (SQLException ignored) {}
+             try { if (conn != null) conn.close(); } catch (SQLException ignored) {}
         }
+    }
+
+    private void openRegisterFrame() {
+        new RegisterFrame().setVisible(true); // Show register frame
+        // Keep the login frame open or dispose it based on desired behavior
+        // dispose(); // Uncomment to close login frame when opening register
     }
 
     public static void main(String[] args) {
         try {
             UIManager.setLookAndFeel(new FlatDarkLaf());
+             // Apply theme settings globally for OptionPanes here
+             UIManager.put("OptionPane.background", ThemeColors.DIALOG_BG);
+             UIManager.put("Panel.background", ThemeColors.DIALOG_BG); // Affects OptionPane panel
+             UIManager.put("OptionPane.messageForeground", ThemeColors.DIALOG_FG);
+             UIManager.put("Button.background", ThemeColors.SECONDARY);
+             UIManager.put("Button.foreground", Color.WHITE);
+             UIManager.put("Button.focus", new Color(ThemeColors.SECONDARY.getRed(), ThemeColors.SECONDARY.getGreen(), ThemeColors.SECONDARY.getBlue(), 180));
+             UIManager.put("Button.hoverBackground", ThemeColors.BUTTON_HOVER);
+             UIManager.put("Button.pressedBackground", ThemeColors.SECONDARY.darker());
         } catch (Exception ex) {
             ex.printStackTrace();
+            System.err.println("Failed to set FlatDarkLaf LookAndFeel");
         }
-        new LoginFrame();
+        SwingUtilities.invokeLater(() -> new LoginFrame()); // Ensure GUI creation on EDT
     }
 }
