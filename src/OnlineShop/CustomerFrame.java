@@ -3,7 +3,7 @@ package OnlineShop;
 // Keep existing imports
 import OnlineShop.AddressManager;
 import OnlineShop.LoginFrame;
-import OnlineShop.PaymentFrame;
+// Removed import OnlineShop.PaymentFrame; // No longer needed directly from here
 import OnlineShop.ProductReviewFrame;
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
@@ -36,6 +36,8 @@ import java.util.Arrays; // Import Arrays for List creation
 // --- THEME: Ensure the external ThemeColors is imported ---
 import OnlineShop.ThemeColors;
 import javax.swing.border.Border;
+import OnlineShop.AddressManager.Address; // Explicitly import Address inner class
+import OnlineShop.CheckoutFrame.AddressManagementDialog; // Import the static inner class
 
 
 public class CustomerFrame extends JFrame {
@@ -82,7 +84,8 @@ public class CustomerFrame extends JFrame {
     private Set<Integer> justReadOrderIds = new HashSet<>(); // Track IDs marked read in current session view
     // --- End Notification Components ---
 
-    private AddressManager addressManager; // Needs AddressManager.java
+    // AddressManager is no longer needed here for selection, but maybe for profile? Keeping it for now.
+    private AddressManager addressManager;
 
     public CustomerFrame(int customerId) {
         // Set window properties before making it displayable
@@ -97,7 +100,8 @@ public class CustomerFrame extends JFrame {
 
         // Initialize instance variables
         this.customerId = customerId;
-        this.addressManager = new AddressManager(this, customerId); // Initialize AddressManager
+        // Initialize AddressManager (needed for profile address display/edit if implemented)
+        this.addressManager = new AddressManager(this, customerId);
         this.currentCard = "Home";
 
         // Initialize main components
@@ -1272,7 +1276,7 @@ public class CustomerFrame extends JFrame {
 
         ImageIcon icon = loadImageIcon(imagePathFromDB, name);
 
-        if (icon != null && isIconValid(icon)) {
+        if (icon != null && isIconValid(icon)) { // Use the public static method
             Image scaledImage = icon.getImage().getScaledInstance(230, 230, Image.SCALE_SMOOTH);
             JLabel imageLabel = new JLabel(new ImageIcon(scaledImage));
             imageLabel.setHorizontalAlignment(SwingConstants.CENTER);
@@ -1329,17 +1333,20 @@ public class CustomerFrame extends JFrame {
     }
 
 
-    // --- NEW METHOD: Handle "Buy Now" button click ---
+    // --- REVISED METHOD: Handle "Buy Now" button click ---
+    // --- Inside CustomerFrame.java ---
+
+    // --- REVISED METHOD: Handle "Buy Now" button click ---
     private void buyNow(int productId, String name, double price) {
         String checkStockSql = "SELECT stock FROM products WHERE id = ?";
-        String insertCartSql = "INSERT INTO cart (product_id, product_name, price, quantity, customer_id) VALUES (?, ?, ?, 1, ?) ON DUPLICATE KEY UPDATE quantity = 1, id=LAST_INSERT_ID(id)"; // Ensure quantity is 1 and get ID
-        String updateStockSql = "UPDATE products SET stock = stock - 1 WHERE id = ? AND stock > 0";
+        // Ensure quantity is 1, handle duplicates, but don't rely on LAST_INSERT_ID() here
+        String insertCartSql = "INSERT INTO cart (product_id, product_name, price, quantity, customer_id) VALUES (?, ?, ?, 1, ?) ON DUPLICATE KEY UPDATE quantity = 1";
+        String findCartIdSql = "SELECT id FROM cart WHERE customer_id = ? AND product_id = ?"; // Used AFTER commit
 
         Connection conn = null;
         PreparedStatement checkStmt = null;
         PreparedStatement insertStmt = null;
-        PreparedStatement updateStockStmt = null;
-        ResultSet generatedKeys = null;
+        PreparedStatement findStmt = null;
         int cartId = -1;
 
         try {
@@ -1359,6 +1366,7 @@ public class CustomerFrame extends JFrame {
                 return;
             }
             rsStock.close();
+            checkStmt.close(); // Close statement
 
             if (stock <= 0) {
                 JOptionPane.showMessageDialog(this, "Sorry, '" + name + "' is currently out of stock.", "Out of Stock", JOptionPane.WARNING_MESSAGE);
@@ -1366,94 +1374,86 @@ public class CustomerFrame extends JFrame {
                 return;
             }
 
-            // 2. Decrement Stock
-            updateStockStmt = conn.prepareStatement(updateStockSql);
-            updateStockStmt.setInt(1, productId);
-            int stockUpdated = updateStockStmt.executeUpdate();
-
-            if (stockUpdated == 0) {
-                JOptionPane.showMessageDialog(this, "Sorry, the last item of '" + name + "' was just sold.", "Out of Stock", JOptionPane.WARNING_MESSAGE);
-                conn.rollback();
-                return;
-            }
-
-            // 3. Add/Update Cart (Quantity 1) and Get Cart ID
-            insertStmt = conn.prepareStatement(insertCartSql, Statement.RETURN_GENERATED_KEYS);
+            // 2. Add/Update Cart (Quantity 1)
+            insertStmt = conn.prepareStatement(insertCartSql);
             insertStmt.setInt(1, productId);
             insertStmt.setString(2, name);
             insertStmt.setDouble(3, price);
             insertStmt.setInt(4, customerId);
             int rowsAffected = insertStmt.executeUpdate();
+            insertStmt.close(); // Close statement
 
-            if (rowsAffected > 0) {
-                 generatedKeys = insertStmt.getGeneratedKeys();
-                 if (generatedKeys.next()) {
-                     cartId = generatedKeys.getInt(1); // Get the cart_id
-                 } else {
-                     // This might happen if ON DUPLICATE KEY UPDATE was triggered but didn't return keys
-                     // We need to query the ID separately if update happened
-                     String findCartIdSql = "SELECT id FROM cart WHERE customer_id = ? AND product_id = ?";
-                     try (PreparedStatement findStmt = conn.prepareStatement(findCartIdSql)) {
-                         findStmt.setInt(1, customerId);
-                         findStmt.setInt(2, productId);
-                         ResultSet findRs = findStmt.executeQuery();
-                         if (findRs.next()) {
-                             cartId = findRs.getInt("id");
-                         }
-                         findRs.close();
-                     }
-                 }
+            if (rowsAffected == 0) {
+                 // This case should ideally not happen with INSERT...ON DUPLICATE unless there's a unique constraint issue beyond the primary key handled by ON DUPLICATE.
+                 // Log a warning or error if needed.
+                 System.err.println("[BUY NOW DEBUG] Warning: INSERT...ON DUPLICATE KEY UPDATE affected 0 rows for product " + productId);
+                 // We can still try to find the cart ID below, as the row might exist.
             }
+
+            // 3. Commit the transaction
+            conn.commit();
+
+            // 4. Reliably get the Cart ID *after* commit
+            findStmt = conn.prepareStatement(findCartIdSql);
+            findStmt.setInt(1, customerId);
+            findStmt.setInt(2, productId);
+            ResultSet findRs = findStmt.executeQuery();
+            if (findRs.next()) {
+                cartId = findRs.getInt("id");
+            }
+            findRs.close();
+            findStmt.close(); // Close statement
+
+            // ***** START DEBUGGING ADDITION *****
+            System.out.println("[BUY NOW DEBUG] Retrieved cartId after commit: " + cartId + " for customerId: " + customerId + ", productId: " + productId);
 
             if (cartId == -1) {
-                 // Could not get cart ID - critical error
-                 throw new SQLException("Failed to retrieve cart ID after insert/update for product ID: " + productId);
+                System.err.println("[BUY NOW DEBUG] CRITICAL: cartId is -1. Cannot proceed to checkout.");
+                conn.rollback(); // Rollback just in case (although commit likely succeeded)
+                JOptionPane.showMessageDialog(this, "Failed to identify the item added to the cart. Please try adding from the cart page.", "Checkout Error", JOptionPane.ERROR_MESSAGE);
+                // Ensure CustomerFrame remains visible if necessary
+                setVisible(true);
+                return; // Stop execution
             }
+            // ***** END DEBUGGING ADDITION *****
 
-            conn.commit(); // Commit transaction if all DB operations succeed
 
-            // 4. Update Cart Badge (reflects the newly added item)
+            // 5. Update Cart Badge (reflects the newly added item)
             updateCartBadge();
 
-            // 5. Address Selection
-            AddressManager.Address selectedAddress = addressManager.showAddressSelection();
-            if (selectedAddress == null) {
-                // User cancelled address selection, item remains in cart. Inform user?
-                JOptionPane.showMessageDialog(this,
-                        "Address selection cancelled. The item remains in your cart.",
-                        "Checkout Cancelled", JOptionPane.INFORMATION_MESSAGE);
-                return; // Stop the "buy now" flow here
-            }
-
-            // 6. Proceed to Payment with ONLY this item
-            System.out.println("Proceeding to payment (Buy Now) for customer " + customerId + " with cartId: " + cartId + ". Address ID: " + selectedAddress.getId());
-            List<Integer> cartIdList = new ArrayList<>();
+            // 6. Proceed to CheckoutFrame immediately using invokeLater
+            final List<Integer> cartIdList = new ArrayList<>(); // Make final for lambda
             cartIdList.add(cartId);
 
-            // Pass the single cart ID to PaymentFrame
-            new PaymentFrame(customerId, cartIdList, selectedAddress).setVisible(true);
+            // ***** START DEBUGGING ADDITION *****
+            System.out.println("[BUY NOW DEBUG] Passing cartIdList to CheckoutFrame: " + cartIdList);
+            // ***** END DEBUGGING ADDITION *****
 
-            // Close this CustomerFrame after launching PaymentFrame
-            dispose();
+            // Use invokeLater for GUI operations
+            SwingUtilities.invokeLater(() -> {
+                // Pass 'this' (CustomerFrame instance) to CheckoutFrame
+                new CheckoutFrame(customerId, cartIdList, this).setVisible(true);
+                // Hide this CustomerFrame
+                setVisible(false);
+            });
+
 
         } catch (SQLException ex) {
             System.err.println("Buy Now SQL Error: " + ex.getMessage());
+            ex.printStackTrace(); // Print stack trace for detailed debugging
             if (conn != null) try { conn.rollback(); } catch (SQLException e) { e.printStackTrace(); }
             JOptionPane.showMessageDialog(this, "Error processing Buy Now: " + ex.getMessage(), "Database Error", JOptionPane.ERROR_MESSAGE);
         } catch (Exception e) {
             System.err.println("Buy Now General Error: " + e.getMessage());
+            e.printStackTrace(); // Print full stack trace for unexpected errors
             if (conn != null) try { conn.rollback(); } catch (SQLException se) { se.printStackTrace(); }
             JOptionPane.showMessageDialog(this, "An unexpected error occurred during Buy Now.", "Error", JOptionPane.ERROR_MESSAGE);
         } finally {
-            // Close resources
-            try { if (generatedKeys != null) generatedKeys.close(); } catch (SQLException ignored) {}
-            try { if (checkStmt != null) checkStmt.close(); } catch (SQLException ignored) {}
-            try { if (insertStmt != null) insertStmt.close(); } catch (SQLException ignored) {}
-            try { if (updateStockStmt != null) updateStockStmt.close(); } catch (SQLException ignored) {}
+            // Close resources (Statements are closed within the try block now)
             if (conn != null) try { conn.setAutoCommit(true); conn.close(); } catch (SQLException ignored) {}
         }
     }
-    // --- END of buyNow method ---
+    // --- END of REVISED buyNow method ---
 
 
     // Product details dialog - doesn't explicitly show color/size unless in description
@@ -1476,12 +1476,12 @@ public class CustomerFrame extends JFrame {
         imageLabel.setHorizontalAlignment(SwingConstants.CENTER);
         ImageIcon icon = loadImageIcon(imagePathFromDB, name);
 
-        if (icon != null && isIconValid(icon)) {
+        if (icon != null && isIconValid(icon)) { // Use the public static method
             Image scaledImage = icon.getImage().getScaledInstance(200, 200, Image.SCALE_SMOOTH);
             imageLabel.setIcon(new ImageIcon(scaledImage));
         } else {
             imageLabel.setText("No Image Available");
-            imageLabel.setForeground(ThemeColors.TEXT);
+            imageLabel.setForeground(ThemeColors.TEXT); // Use ThemeColors.TEXT for consistency
         }
         imagePanel.add(imageLabel);
         detailsPanel.add(imagePanel, BorderLayout.NORTH);
@@ -1499,14 +1499,14 @@ public class CustomerFrame extends JFrame {
 
         JLabel priceLabel = new JLabel(String.format("Price: ₱%.2f", price), SwingConstants.CENTER);
         priceLabel.setFont(new Font("Arial", Font.PLAIN, 16));
-        priceLabel.setForeground(ThemeColors.TEXT);
+        priceLabel.setForeground(ThemeColors.TEXT); // Use ThemeColors.TEXT
         priceLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
 
         JTextArea descArea = new JTextArea(description != null ? description : "No description available.");
         descArea.setEditable(false);
         descArea.setFont(new Font("Arial", Font.PLAIN, 14));
         descArea.setBackground(ThemeColors.BACKGROUND);
-        descArea.setForeground(ThemeColors.TEXT);
+        descArea.setForeground(ThemeColors.TEXT); // Use ThemeColors.TEXT
         descArea.setLineWrap(true);
         descArea.setWrapStyleWord(true);
         descArea.setAlignmentX(Component.CENTER_ALIGNMENT);
@@ -1540,8 +1540,13 @@ public class CustomerFrame extends JFrame {
             detailsDialog.dispose();
         });
 
-        JButton closeButton = createStyledButton("Close", ThemeColors.CARD_BG);
-        closeButton.setForeground(ThemeColors.TEXT);
+        // FIX: Use ThemeColors.SECONDARY or another defined color for Close button BG
+        // Using CARD_BG might make it blend too much with the background.
+        // Using SECONDARY provides better contrast typically.
+        JButton closeButton = createStyledButton("Close", ThemeColors.SECONDARY);
+        // You might still want distinct text color if SECONDARY is dark.
+        // Keep this if SECONDARY is dark, or adjust as needed.
+        // closeButton.setForeground(ThemeColors.TEXT);
         closeButton.addActionListener(e -> detailsDialog.dispose());
 
         buttonPanel.add(addToCartButton);
@@ -1555,6 +1560,7 @@ public class CustomerFrame extends JFrame {
         detailsDialog.setVisible(true);
     }
 
+     // *** MODIFIED: Changed from private to public static ***
      public static ImageIcon loadImageIcon(String dbPath, String productName) {
         ImageIcon icon = null;
         URL imageURL = null;
@@ -1658,7 +1664,7 @@ public class CustomerFrame extends JFrame {
         // 6. Create ImageIcon and Validate
         if (imageURL != null) {
             icon = new ImageIcon(imageURL);
-            if (!isIconValid(icon)) {
+            if (!isIconValid(icon)) { // Use the public static method
                 System.err.println("Warning: Invalid image loaded for '" + productName + "' from " + loadedFrom + ". URL: " + imageURL + ". Using placeholder.");
                 icon = createPlaceholderIcon(productName);
                 loadedFrom += " (Invalid, using Placeholder)";
@@ -1706,10 +1712,12 @@ public class CustomerFrame extends JFrame {
     }
 
 
-    private static boolean isIconValid(ImageIcon icon) {
+    // *** MODIFIED: Changed from private to public static ***
+    public static boolean isIconValid(ImageIcon icon) {
         if (icon == null) return false;
         return icon.getImageLoadStatus() == MediaTracker.COMPLETE && icon.getIconWidth() > 0 && icon.getIconHeight() > 0;
     }
+    // *** END MODIFICATION ***
 
 
     private JPanel createProductsPanel() {
@@ -1897,7 +1905,7 @@ public class CustomerFrame extends JFrame {
         imagePanel.setBorder(BorderFactory.createLineBorder(ThemeColors.SECONDARY, 1));
 
         ImageIcon icon = loadImageIcon(imagePathFromDB, productName);
-        if (icon != null && isIconValid(icon)) {
+        if (icon != null && isIconValid(icon)) { // Use the public static method
             Image scaledImage = icon.getImage().getScaledInstance(80, 80, Image.SCALE_SMOOTH);
             JLabel imageLabel = new JLabel(new ImageIcon(scaledImage));
             imagePanel.add(imageLabel);
@@ -2069,71 +2077,59 @@ public class CustomerFrame extends JFrame {
              return;
          }
 
-        String sql = "UPDATE cart SET quantity = ? WHERE id = ?";
+        // NOTE: This method modifies stock directly, which might conflict
+        // with stock handling in CheckoutFrame's placeOrder.
+        // Consider REMOVING stock updates here and letting placeOrder handle final stock deduction.
+        // For now, keeping the stock update logic but acknowledging the potential conflict.
+
         String checkStockSql = "SELECT stock FROM products WHERE id = (SELECT product_id FROM cart WHERE id = ?)";
-        String updateStockSql = "UPDATE products SET stock = stock + ? WHERE id = (SELECT product_id FROM cart WHERE id = ?)";
-        String getOldQtySql = "SELECT quantity FROM cart WHERE id = ?";
+        String updateCartSql = "UPDATE cart SET quantity = ? WHERE id = ?";
+        // String updateStockSql = "UPDATE products SET stock = ? WHERE id = (SELECT product_id FROM cart WHERE id = ?)"; // Original update logic
 
         Connection conn = null;
-        PreparedStatement stmt = null;
         PreparedStatement checkStmt = null;
-        PreparedStatement updateStockStmt = null;
-        PreparedStatement oldQtyStmt = null;
+        PreparedStatement cartStmt = null;
+        // PreparedStatement stockStmt = null; // REMOVED direct stock update
 
         try {
             conn = DBConnection.connect();
             conn.setAutoCommit(false); // Transaction control
 
-            // Get old quantity to calculate stock change
-            int oldQuantity = 0;
-            oldQtyStmt = conn.prepareStatement(getOldQtySql);
-            oldQtyStmt.setInt(1, cartId);
-            ResultSet oldQtyRs = oldQtyStmt.executeQuery();
-            if (oldQtyRs.next()) {
-                oldQuantity = oldQtyRs.getInt(1);
+            // Check available stock BEFORE updating cart
+            int currentStock = 0;
+            checkStmt = conn.prepareStatement(checkStockSql);
+            checkStmt.setInt(1, cartId);
+            ResultSet stockRs = checkStmt.executeQuery();
+            if (stockRs.next()) {
+                currentStock = stockRs.getInt("stock");
             } else {
-                throw new SQLException("Could not find original cart item quantity for cartId: " + cartId);
+                throw new SQLException("Could not find product stock information for cartId: " + cartId);
             }
-            oldQtyRs.close();
+            stockRs.close();
 
-            int quantityChange = newQuantity - oldQuantity;
-
-            // If increasing quantity, check stock
-            if (quantityChange > 0) {
-                int currentStock = 0;
-                checkStmt = conn.prepareStatement(checkStockSql);
-                checkStmt.setInt(1, cartId);
-                ResultSet stockRs = checkStmt.executeQuery();
-                if (stockRs.next()) {
-                    currentStock = stockRs.getInt("stock");
-                } else {
-                    throw new SQLException("Could not find product stock information for cartId: " + cartId);
-                }
-                stockRs.close();
-
-                // Check if enough stock for the increase
-                if (currentStock < quantityChange) {
-                    JOptionPane.showMessageDialog(this,
-                            "Not enough stock available. Only " + currentStock + " more can be added.",
-                            "Stock Error", JOptionPane.ERROR_MESSAGE);
-                    conn.rollback(); // Rollback transaction
-                    return;
-                }
+            if (newQuantity > currentStock) {
+                 JOptionPane.showMessageDialog(this,
+                         "Not enough stock available. Only " + currentStock + " left.",
+                         "Stock Error", JOptionPane.ERROR_MESSAGE);
+                 conn.rollback(); // Rollback transaction
+                 // Reset spinner in UI if panel is provided
+                 if(itemPanel != null) {
+                    JLabel qtyLabel = (JLabel) itemPanel.getClientProperty("qtyLabel");
+                    if (qtyLabel != null) qtyLabel.setText(String.valueOf(currentStock)); // Reset to max available
+                 }
+                 return;
             }
 
             // Update cart quantity
-            stmt = conn.prepareStatement(sql);
-            stmt.setInt(1, newQuantity);
-            stmt.setInt(2, cartId);
-            stmt.executeUpdate();
+            cartStmt = conn.prepareStatement(updateCartSql);
+            cartStmt.setInt(1, newQuantity);
+            cartStmt.setInt(2, cartId);
+            cartStmt.executeUpdate();
 
-            // Update product stock (decrease if quantityChange > 0, increase if < 0)
-            updateStockStmt = conn.prepareStatement(updateStockSql);
-            updateStockStmt.setInt(1, -quantityChange); // Note the negative sign
-            updateStockStmt.setInt(2, cartId); // Using cartId to find product_id via subquery
-            updateStockStmt.executeUpdate();
+            // ** REMOVED direct stock update from here **
+            // Stock deduction will happen during the `placeOrder` transaction in CheckoutFrame.
 
-            conn.commit(); // Commit transaction
+            conn.commit(); // Commit cart quantity update
 
             // Update UI components if panel is provided
             if (itemPanel != null) {
@@ -2159,13 +2155,13 @@ public class CustomerFrame extends JFrame {
                     "Database Error", JOptionPane.ERROR_MESSAGE);
         } finally {
             // Close resources
-            try { if (oldQtyStmt != null) oldQtyStmt.close(); } catch (SQLException ignored) {}
             try { if (checkStmt != null) checkStmt.close(); } catch (SQLException ignored) {}
-            try { if (stmt != null) stmt.close(); } catch (SQLException ignored) {}
-            try { if (updateStockStmt != null) updateStockStmt.close(); } catch (SQLException ignored) {}
+            try { if (cartStmt != null) cartStmt.close(); } catch (SQLException ignored) {}
+            // try { if (stockStmt != null) stockStmt.close(); } catch (SQLException ignored) {} // REMOVED
             if (conn != null) try { conn.setAutoCommit(true); conn.close(); } catch (SQLException ignored) {}
         }
     }
+
 
     // Calculates total based on *selected* checkboxes in the cart
     private void calculateSelectedTotal() {
@@ -2211,66 +2207,36 @@ public class CustomerFrame extends JFrame {
         }
     }
 
-    // Removes item from DB and UI, restores stock
+    // Removes item from DB and UI. Stock is NOT restored here, as it wasn't decremented on add.
     private void removeCartItem(int cartId) {
-        String getQtySql = "SELECT quantity, product_id FROM cart WHERE id = ?";
-        String deleteSql = "DELETE FROM cart WHERE id = ?";
-        String updateStockSql = "UPDATE products SET stock = stock + ? WHERE id = ?"; // Restore stock
+        String deleteSql = "DELETE FROM cart WHERE id = ? AND customer_id = ?"; // Add customer_id check
 
         Connection conn = null;
-        PreparedStatement getQtyStmt = null;
         PreparedStatement deleteStmt = null;
-        PreparedStatement updateStockStmt = null;
 
         try {
             conn = DBConnection.connect();
-            conn.setAutoCommit(false); // Transaction control
-
-            // Get quantity and product ID before deleting
-            int quantityToRemove = 0;
-            int productId = -1;
-            getQtyStmt = conn.prepareStatement(getQtySql);
-            getQtyStmt.setInt(1, cartId);
-            ResultSet rs = getQtyStmt.executeQuery();
-            if (rs.next()) {
-                quantityToRemove = rs.getInt("quantity");
-                productId = rs.getInt("product_id");
-            } else {
-                // Item already removed or doesn't exist
-                System.err.println("Warning: Cart item with ID " + cartId + " not found for removal. Rolling back.");
-                conn.rollback();
-                loadCartItems(); // Refresh cart just in case
-                updateCartBadge();
-                return;
-            }
-            rs.close();
+            // No transaction needed for simple delete
 
             // Delete item from cart
             deleteStmt = conn.prepareStatement(deleteSql);
             deleteStmt.setInt(1, cartId);
+            deleteStmt.setInt(2, customerId); // Ensure correct customer
             int rowsAffected = deleteStmt.executeUpdate();
 
-            // If deleted successfully and we know the product/quantity, restore stock
-            if (rowsAffected > 0 && productId != -1 && quantityToRemove > 0) {
-                updateStockStmt = conn.prepareStatement(updateStockSql);
-                updateStockStmt.setInt(1, quantityToRemove); // Add stock back
-                updateStockStmt.setInt(2, productId);
-                updateStockStmt.executeUpdate();
-            } else if (rowsAffected <= 0) {
-                // Deletion failed
-                conn.rollback();
-                System.err.println("Failed to remove cart item for cartId " + cartId + ". Rolling back.");
+            if (rowsAffected > 0) {
+                System.out.println("Cart item " + cartId + " removed for customer " + customerId);
+                // Refresh UI
+                loadCartItems();
+                updateCartBadge();
+            } else {
+                 System.err.println("Warning: removeCartItem affected 0 rows for cartId " + cartId);
+                 // Optionally show a message, or just log
             }
 
-            conn.commit(); // Commit transaction
-
-            // Refresh UI
-            loadCartItems();
-            updateCartBadge();
 
         } catch (SQLException ex) {
             System.err.println("Error removing item (cartId " + cartId + "): " + ex.getMessage());
-            if (conn != null) try { conn.rollback(); } catch (SQLException e) { e.printStackTrace(); } // Rollback on error
             JOptionPane.showMessageDialog(this,
                     "Error removing item from cart: " + ex.getMessage(),
                     "Database Error", JOptionPane.ERROR_MESSAGE);
@@ -2279,12 +2245,11 @@ public class CustomerFrame extends JFrame {
             updateCartBadge();
         } finally {
             // Close resources
-            try { if (getQtyStmt != null) getQtyStmt.close(); } catch (SQLException ignored) {}
             try { if (deleteStmt != null) deleteStmt.close(); } catch (SQLException ignored) {}
-            try { if (updateStockStmt != null) updateStockStmt.close(); } catch (SQLException ignored) {}
-            if (conn != null) try { conn.setAutoCommit(true); conn.close(); } catch (SQLException ignored) {}
+            try { if (conn != null) conn.close(); } catch (SQLException ignored) {}
         }
     }
+
 
     private JPanel createWishlistPanel() {
         JPanel panel = new JPanel(new BorderLayout());
@@ -2396,7 +2361,7 @@ public class CustomerFrame extends JFrame {
         imagePanel.setBorder(BorderFactory.createLineBorder(ThemeColors.SECONDARY, 1));
 
         ImageIcon icon = loadImageIcon(imagePathFromDB, productName);
-        if (icon != null && isIconValid(icon)) {
+        if (icon != null && isIconValid(icon)) { // Use the public static method
             Image scaledImage = icon.getImage().getScaledInstance(80, 80, Image.SCALE_SMOOTH);
             JLabel imageLabel = new JLabel(new ImageIcon(scaledImage));
             imagePanel.add(imageLabel);
@@ -2638,7 +2603,7 @@ public class CustomerFrame extends JFrame {
         PreparedStatement insertStmt = null;
         PreparedStatement selectStmt = null;
         PreparedStatement checkStockStmt = null;
-        PreparedStatement updateStockStmt = null;
+        // PreparedStatement updateStockStmt = null; // REMOVED Stock update
         int itemsMovedCount = 0;
         List<Integer> successfullyMovedIds = new ArrayList<>();
         List<String> stockIssues = new ArrayList<>();
@@ -2653,13 +2618,13 @@ public class CustomerFrame extends JFrame {
                     "VALUES (?, ?, ?, 1, ?) ON DUPLICATE KEY UPDATE quantity = quantity + 1"; // Add/increment cart
             String deleteSql = "DELETE FROM wishlist WHERE customer_id = ? AND product_id = ?"; // Remove from wishlist
             String checkStockSql = "SELECT stock FROM products WHERE id = ?"; // Check stock
-            String decStockSql = "UPDATE products SET stock = stock - 1 WHERE id = ? AND stock > 0"; // Decrement stock
+            // String decStockSql = "UPDATE products SET stock = stock - 1 WHERE id = ? AND stock > 0"; // REMOVED
 
             selectStmt = conn.prepareStatement(selectSql);
             insertStmt = conn.prepareStatement(insertSql);
             deleteStmt = conn.prepareStatement(deleteSql);
             checkStockStmt = conn.prepareStatement(checkStockSql);
-            updateStockStmt = conn.prepareStatement(decStockSql);
+            // updateStockStmt = conn.prepareStatement(decStockSql); // REMOVED
 
             for (int productId : productIdsToMove) {
                 // 1. Check stock
@@ -2697,32 +2662,28 @@ public class CustomerFrame extends JFrame {
                      continue; // Skip this item
                  }
 
-                // 4. Attempt to decrement stock
-                updateStockStmt.setInt(1, productId);
-                int stockUpdatedRows = updateStockStmt.executeUpdate();
-                updateStockStmt.clearParameters();
+                 // 4. Attempt to add to cart (or increment quantity)
+                 // Stock will be handled during checkout, not here.
+                 insertStmt.setInt(1, productId);
+                 insertStmt.setString(2, productName);
+                 insertStmt.setDouble(3, price);
+                 insertStmt.setInt(4, customerId);
+                 int cartRowsAffected = insertStmt.executeUpdate();
+                 insertStmt.clearParameters();
 
-                if (stockUpdatedRows > 0) {
-                    // 5. Stock decremented, now add to cart (or increment quantity)
-                    insertStmt.setInt(1, productId);
-                    insertStmt.setString(2, productName);
-                    insertStmt.setDouble(3, price);
-                    insertStmt.setInt(4, customerId);
-                    insertStmt.executeUpdate();
-                    insertStmt.clearParameters();
+                 if (cartRowsAffected > 0) {
+                     // Mark as successfully moved ( conceptually, added to cart)
+                     successfullyMovedIds.add(productId);
+                     itemsMovedCount++;
+                     anyMoved = true;
+                 } else {
+                      // Should not happen with ON DUPLICATE KEY unless DB error
+                      stockIssues.add(productNameForMsg + " (Failed to add to cart)");
+                 }
 
-                    // Mark as successfully moved
-                    successfullyMovedIds.add(productId);
-                    itemsMovedCount++;
-                    anyMoved = true;
-
-                } else {
-                     // Failed to decrement stock (likely race condition, stock hit 0 just now)
-                     stockIssues.add(productNameForMsg + " (Just went out of stock)");
-                }
             } // End loop through product IDs
 
-            // 6. If any items were successfully moved to cart, remove them from wishlist
+            // 5. If any items were successfully moved to cart, remove them from wishlist
             if (!successfullyMovedIds.isEmpty()) {
                 for (int movedId : successfullyMovedIds) {
                     deleteStmt.setInt(1, customerId);
@@ -2747,7 +2708,7 @@ public class CustomerFrame extends JFrame {
             try { if (insertStmt != null) insertStmt.close(); } catch (SQLException ignored) {}
             try { if (deleteStmt != null) deleteStmt.close(); } catch (SQLException ignored) {}
             try { if (checkStockStmt != null) checkStockStmt.close(); } catch (SQLException ignored) {}
-            try { if (updateStockStmt != null) updateStockStmt.close(); } catch (SQLException ignored) {}
+            // try { if (updateStockStmt != null) updateStockStmt.close(); } catch (SQLException ignored) {} // REMOVED
             if (conn != null) {
                 try { conn.setAutoCommit(true); conn.close(); } catch (SQLException e) { e.printStackTrace(); }
             }
@@ -2769,7 +2730,7 @@ public class CustomerFrame extends JFrame {
         // Append stock issues if any occurred
         if (!stockIssues.isEmpty()) {
              if (resultMessage.length() > 0) resultMessage.append("\n\n"); // Add separator if needed
-            resultMessage.append("Could not move the following items due to stock issues or errors:\n");
+            resultMessage.append("Could not move the following items:\n"); // Simpler message
             for(String issue : stockIssues) {
                 resultMessage.append("- ").append(issue).append("\n");
             }
@@ -2877,7 +2838,7 @@ public class CustomerFrame extends JFrame {
         imagePanel.setBorder(BorderFactory.createLineBorder(ThemeColors.SECONDARY, 1));
 
         ImageIcon icon = loadImageIcon(imagePathFromDB, productName);
-        if (icon != null && isIconValid(icon)) {
+        if (icon != null && isIconValid(icon)) { // Use the public static method
             Image scaledImage = icon.getImage().getScaledInstance(100, 100, Image.SCALE_SMOOTH);
             JLabel imageLabel = new JLabel(new ImageIcon(scaledImage));
             imagePanel.add(imageLabel);
@@ -3309,7 +3270,7 @@ public class CustomerFrame extends JFrame {
         imageLabel.setBorder(BorderFactory.createLineBorder(ThemeColors.SECONDARY));
         imageLabel.setHorizontalAlignment(SwingConstants.CENTER);
         ImageIcon icon = loadImageIcon(imagePath, name);
-        if (icon != null && isIconValid(icon)) {
+        if (icon != null && isIconValid(icon)) { // Use the public static method
             Image scaledImage = icon.getImage().getScaledInstance(50, 50, Image.SCALE_SMOOTH);
             imageLabel.setIcon(new ImageIcon(scaledImage));
         } else {
@@ -3594,7 +3555,8 @@ public class CustomerFrame extends JFrame {
     }
 
     // Creates a styled button with hover effect
-    private JButton createStyledButton(String text, Color bgColor) {
+    // *** MODIFIED: Made public static for reuse by ProfileDialog ***
+    public static JButton createStyledButton(String text, Color bgColor) {
         JButton button = new JButton(text);
         button.setFont(new Font("Arial", Font.BOLD, 14));
         button.setBackground(bgColor);
@@ -3637,12 +3599,12 @@ public class CustomerFrame extends JFrame {
         String insertSql = "INSERT INTO cart (product_id, product_name, price, quantity, customer_id) " +
                 "VALUES (?, ?, ?, 1, ?) " +
                 "ON DUPLICATE KEY UPDATE quantity = quantity + 1";
-        String updateStockSql = "UPDATE products SET stock = stock - 1 WHERE id = ? AND stock > 0";
+        // String updateStockSql = "UPDATE products SET stock = stock - 1 WHERE id = ? AND stock > 0"; // REMOVED - Stock handled in checkout
 
         Connection conn = null;
         PreparedStatement checkStmt = null;
         PreparedStatement insertStmt = null;
-        PreparedStatement updateStockStmt = null;
+        // PreparedStatement updateStockStmt = null; // REMOVED
 
         try {
             conn = DBConnection.connect();
@@ -3672,33 +3634,17 @@ public class CustomerFrame extends JFrame {
                 return;
             }
 
-            // 2. Decrement Stock
-            updateStockStmt = conn.prepareStatement(updateStockSql);
-            updateStockStmt.setInt(1, productId);
-            int stockUpdated = updateStockStmt.executeUpdate();
-
-            if (stockUpdated == 0) {
-                // Stock couldn't be decremented (likely race condition, stock became 0)
-                JOptionPane.showMessageDialog(this,
-                        "Sorry, the last item of '" + name + "' was just sold.",
-                        "Out of Stock",
-                        JOptionPane.WARNING_MESSAGE);
-                conn.rollback(); // Rollback transaction
-                return;
-            }
-
-            // 3. Add/Update Cart
+            // 2. Add/Update Cart (Stock deduction moved to checkout)
             insertStmt = conn.prepareStatement(insertSql);
             insertStmt.setInt(1, productId);
             insertStmt.setString(2, name);
             insertStmt.setDouble(3, price);
             insertStmt.setInt(4, customerId);
-
             int rowsAffected = insertStmt.executeUpdate();
 
             conn.commit(); // Commit transaction
 
-            // 4. Update UI
+            // 3. Update UI
             if (rowsAffected > 0) {
                 JOptionPane.showMessageDialog(this,
                         "'" + name + "' added to cart!",
@@ -3710,8 +3656,6 @@ public class CustomerFrame extends JFrame {
                     loadCartItems();
                 }
             } else {
-                // This case should ideally not happen with ON DUPLICATE KEY UPDATE
-                // but included for robustness. Could indicate an issue.
                 System.err.println("Cart update/insert query affected 0 rows for product ID: " + productId);
                 JOptionPane.showMessageDialog(this,
                         "Could not add item to cart. Please try again.",
@@ -3731,7 +3675,7 @@ public class CustomerFrame extends JFrame {
             // Close resources in finally block
             try { if (checkStmt != null) checkStmt.close(); } catch (SQLException ignored) {}
             try { if (insertStmt != null) insertStmt.close(); } catch (SQLException ignored) {}
-            try { if (updateStockStmt != null) updateStockStmt.close(); } catch (SQLException ignored) {}
+            // try { if (updateStockStmt != null) updateStockStmt.close(); } catch (SQLException ignored) {} // REMOVED
             if (conn != null) try { conn.setAutoCommit(true); conn.close(); } catch (SQLException ignored) {} // Reset auto-commit and close
         }
     }
@@ -3957,7 +3901,7 @@ public class CustomerFrame extends JFrame {
 
 
     // Loads customer's order history from DB - No color/size needed
-    private void loadOrders() {
+    public void loadOrders() { // Made public for CheckoutFrame to call
          Object panelObj = orderTrackingPanel.getClientProperty("ordersPanel");
          if (!(panelObj instanceof JPanel)) {
              System.err.println("Error: Could not find orders panel using client property.");
@@ -4024,150 +3968,86 @@ public class CustomerFrame extends JFrame {
     }
 
 
-    // Handles the checkout process: stock check, address selection, opens payment frame.
-    // This is used by the "Proceed to Checkout" button in the Cart view.
     private void checkout() {
         List<Integer> selectedCartIds = new ArrayList<>();
-        double totalAmount = 0.0;
-        List<String> unavailableItems = new ArrayList<>();
 
+        // --- Step 1: Get selected cart IDs ---
         if (cartItemsPanel == null) {
-             JOptionPane.showMessageDialog(this, "Cart panel is not available. Cannot proceed to checkout.", "Checkout Error", JOptionPane.ERROR_MESSAGE);
-             return;
-         }
+            System.err.println("ERROR: checkout() called but cartItemsPanel is null.");
+            JOptionPane.showMessageDialog(this,
+                    "Cannot proceed to checkout. Cart panel is unavailable.",
+                    "Checkout Error", JOptionPane.ERROR_MESSAGE);
+            return; // Stop if the panel doesn't exist
+        }
 
-        Connection conn = null;
-        PreparedStatement checkStockStmt = null;
+        // Iterate through components in the cartItemsPanel to find selected items
+        for (Component comp : cartItemsPanel.getComponents()) {
+            // Check if the component is the JPanel representing a cart item
+            if (comp instanceof JPanel) {
+                JPanel itemPanel = (JPanel) comp;
+                // Ensure it's actually a cart item panel by checking for the cartId property
+                if (itemPanel.getClientProperty("cartId") instanceof Integer) {
+                    // Find the checkbox within this item panel
+                    JCheckBox checkbox = findCheckboxInPanel(itemPanel); // Use the helper method
 
-        try {
-            conn = DBConnection.connect();
-            // SQL checks stock based on cart ID and customer ID
-            String checkStockSql = "SELECT p.name, p.stock FROM cart c JOIN products p ON c.product_id = p.id WHERE c.id = ? AND c.customer_id = ?";
-            checkStockStmt = conn.prepareStatement(checkStockSql);
-
-            // Iterate through displayed cart items
-            for (Component comp : cartItemsPanel.getComponents()) {
-                if (comp instanceof JPanel) {
-                    JPanel itemPanel = (JPanel) comp;
-                    if (!(itemPanel.getClientProperty("cartId") instanceof Integer)) continue; // Skip non-item panels
-
-                    Integer cartId = (Integer) itemPanel.getClientProperty("cartId");
-                    JCheckBox checkbox = findCheckboxInPanel(itemPanel); // Find the checkbox within the item panel
-
-                    // If item is selected and has a valid cart ID
-                    if (checkbox != null && checkbox.isSelected() && cartId != null) {
-                        // Get price and quantity stored in the checkbox's properties
-                        double price = (double) checkbox.getClientProperty("price");
-                        int quantity = (int) checkbox.getClientProperty("quantity");
-
-                        // Check current stock in DB
-                        checkStockStmt.setInt(1, cartId);
-                        checkStockStmt.setInt(2, customerId);
-                        ResultSet rs = checkStockStmt.executeQuery();
-                        boolean available = false;
-                        String productName = "Item ID " + cartId; // Fallback name
-                        if (rs.next()) {
-                             productName = rs.getString("name");
-                            int currentStock = rs.getInt("stock");
-                            if (currentStock >= quantity) {
-                                available = true; // Enough stock
-                            } else {
-                                // Not enough stock, add to unavailable list
-                                unavailableItems.add(productName + " (Only " + currentStock + " left, you selected " + quantity + ")");
-                            }
-                        } else {
-                            // Item not found in cart/product table (shouldn't happen if cart is loaded correctly)
-                            unavailableItems.add("An item you selected (" + productName + ") is no longer available.");
-                        }
-                        rs.close();
-                        checkStockStmt.clearParameters();
-
-                        // If available, add to list and update total
-                        if (available) {
+                    if (checkbox != null && checkbox.isSelected()) {
+                        // If the checkbox is found and selected, get the cart ID
+                        Integer cartId = (Integer) itemPanel.getClientProperty("cartId");
+                        if (cartId != null) {
                             selectedCartIds.add(cartId);
-                            totalAmount += price * quantity;
+                            System.out.println("DEBUG: Added cartId to checkout: " + cartId); // Debug log
+                        } else {
+                             System.err.println("WARN: Found selected checkbox but cartId property was null in item panel.");
                         }
+                    } else if (checkbox == null) {
+                         System.err.println("WARN: Could not find checkbox in cart item panel with cartId=" + itemPanel.getClientProperty("cartId"));
                     }
                 }
             }
-
-            // --- Validation Checks ---
-
-            // If any selected items became unavailable
-            if (!unavailableItems.isEmpty()) {
-                StringBuilder message = new StringBuilder("Some selected items are no longer available or have insufficient stock:\n");
-                for (String itemInfo : unavailableItems) {
-                    message.append("- ").append(itemInfo).append("\n");
-                }
-                message.append("\nPlease adjust your cart and try again.");
-                JOptionPane.showMessageDialog(this, message.toString(), "Checkout Error", JOptionPane.ERROR_MESSAGE);
-                loadCartItems(); // Refresh cart view
-                return;
-            }
-
-            // If no *available* items were selected
-            if (selectedCartIds.isEmpty()) {
-                JOptionPane.showMessageDialog(this,
-                        "Please select at least one available item to checkout",
-                        "Selection Error", JOptionPane.WARNING_MESSAGE);
-                return;
-            }
-
-             // If total is zero or negative (unlikely but possible with errors)
-             if (totalAmount <= 0) {
-                 JOptionPane.showMessageDialog(this,
-                         "Cannot proceed with zero or negative total amount. Please check selected items.",
-                         "Checkout Error", JOptionPane.ERROR_MESSAGE);
-                 return;
-             }
-
-            // --- Address Selection ---
-            AddressManager.Address selectedAddress = addressManager.showAddressSelection();
-            if (selectedAddress == null) {
-                JOptionPane.showMessageDialog(this, "Address selection cancelled or no address available.", "Checkout Stopped", JOptionPane.INFORMATION_MESSAGE);
-                return; // Stop checkout if no address is selected/available
-            }
-
-            // --- Proceed to Payment ---
-             System.out.println("Proceeding to payment for customer " + customerId + " with " + selectedCartIds.size() + " items. Total: " + totalAmount + ". Address ID: " + selectedAddress.getId());
-
-             // Pass the selected cart IDs (could be multiple) to PaymentFrame
-             new PaymentFrame(customerId, selectedCartIds, selectedAddress).setVisible(true);
-
-             // Close the current CustomerFrame
-             dispose(); // Close this frame after opening payment
-
-        } catch (SQLException ex) {
-            System.err.println("Error during checkout stock check: " + ex.getMessage());
-            ex.printStackTrace();
-            JOptionPane.showMessageDialog(this, "Error checking item availability: " + ex.getMessage(), "Checkout Error", JOptionPane.ERROR_MESSAGE);
-        } catch (Exception e) {
-             // Catch potential issues getting properties from checkboxes etc.
-             System.err.println("Non-SQL Error during checkout preparation: " + e.getMessage());
-             e.printStackTrace();
-             JOptionPane.showMessageDialog(this, "An unexpected error occurred during checkout preparation.", "Checkout Error", JOptionPane.ERROR_MESSAGE);
-        } finally {
-            try { if (checkStockStmt != null) checkStockStmt.close(); } catch (SQLException ignored) {}
-            try { if (conn != null) conn.close(); } catch (SQLException ignored) {}
         }
+
+        // --- Step 2: Validate Selection ---
+        if (selectedCartIds.isEmpty()) {
+            JOptionPane.showMessageDialog(this,
+                    "Please select at least one item from your cart to checkout.",
+                    "Selection Error", JOptionPane.WARNING_MESSAGE);
+            return; // Stop if nothing is selected
+        }
+
+        // --- Step 3: Launch CheckoutFrame ---
+        System.out.println("Proceeding to checkout for customer " + customerId + " with cart IDs: " + selectedCartIds);
+
+        // Make final for use in lambda expression
+        final List<Integer> finalSelectedCartIds = selectedCartIds;
+
+        // Use invokeLater to ensure GUI operations are on the Event Dispatch Thread
+        SwingUtilities.invokeLater(() -> {
+            // Create and show the new combined CheckoutFrame
+            // Pass 'this' (the CustomerFrame instance) so CheckoutFrame can interact back if needed
+            // (e.g., to refresh badges or re-show CustomerFrame after order)
+            new CheckoutFrame(customerId, finalSelectedCartIds, this).setVisible(true);
+
+            // Hide the current CustomerFrame while the checkout process is active
+            // CheckoutFrame will handle showing it again or closing it based on outcome.
+            setVisible(false);
+        });
     }
 
-
-    // Helper method to recursively find a JCheckBox within a container
+    // Helper method to find a JCheckBox within a container (ensure this exists in CustomerFrame)
     private JCheckBox findCheckboxInPanel(Container container) {
-        if (container == null) return null;
-        for (Component comp : container.getComponents()) {
-            if (comp instanceof JCheckBox) {
-                return (JCheckBox) comp;
-            } else if (comp instanceof Container) {
-                // Recursively search in sub-containers
-                JCheckBox found = findCheckboxInPanel((Container) comp);
-                if (found != null) {
-                    return found;
-                }
-            }
-        }
-        return null; // Not found in this container or its children
+       if (container == null) return null;
+       for (Component comp : container.getComponents()) {
+           if (comp instanceof JCheckBox) {
+               return (JCheckBox) comp;
+           } else if (comp instanceof Container) {
+               // Recursively search in sub-containers (important for nested layouts)
+               JCheckBox found = findCheckboxInPanel((Container) comp);
+               if (found != null) {
+                   return found;
+               }
+           }
+       }
+       return null; // Checkbox not found in this container or its children
     }
 
 
@@ -4204,7 +4084,7 @@ public class CustomerFrame extends JFrame {
     }
 
     // Switches the visible panel in the main CardLayout
-    private void showCard(String cardName) {
+    public void showCard(String cardName) { // Made public for CheckoutFrame
         cardLayout.show(mainPanel, cardName);
         currentCard = cardName; // Update the tracking variable
         System.out.println("Showing card: " + cardName);
@@ -4234,7 +4114,7 @@ public class CustomerFrame extends JFrame {
 
     // --- Badge Update Methods ---
 
-    private void updateCartBadge() {
+    public void updateCartBadge() { // Made public for CheckoutFrame
         int count = getCartItemCount();
         ActionListener cartAction = e -> { loadCartItems(); showCard("Cart"); };
         JComponent newCartButtonContainer = createBadgeButtonWithCounter("CART", count, cartAction);
@@ -4242,7 +4122,7 @@ public class CustomerFrame extends JFrame {
         cartButtonContainer = newCartButtonContainer;
     }
 
-    private void updateWishlistBadge() {
+    public void updateWishlistBadge() { // Made public for CheckoutFrame
         int count = getWishlistItemCount();
         ActionListener wishlistAction = e -> { loadWishlist(); showCard("Wishlist"); };
         JComponent newWishlistButtonContainer = createBadgeButtonWithCounter("WISHLIST", count, wishlistAction);
@@ -4250,7 +4130,7 @@ public class CustomerFrame extends JFrame {
         wishlistButtonContainer = newWishlistButtonContainer;
     }
 
-    private void updateOrderBadge() {
+    public void updateOrderBadge() { // Made public for CheckoutFrame
         int count = getOrderCount();
         ActionListener ordersAction = e -> { loadOrders(); showCard("Orders"); };
         JComponent newOrdersButtonContainer = createBadgeButtonWithCounter("ORDERS", count, ordersAction);
@@ -4299,7 +4179,8 @@ public class CustomerFrame extends JFrame {
     }
 
      // Styles a JScrollPane's vertical scrollbar
-     private void styleScrollPane(JScrollPane scrollPane) {
+     // *** MODIFIED: Made public static for reuse by ProfileDialog ***
+     public static void styleScrollPane(JScrollPane scrollPane) {
          JScrollBar verticalScrollBar = scrollPane.getVerticalScrollBar();
          verticalScrollBar.setUI(new javax.swing.plaf.basic.BasicScrollBarUI() {
              @Override
@@ -4366,16 +4247,16 @@ public class CustomerFrame extends JFrame {
         private int dialogCustomerId;
         private JLabel profilePicLabel;
         private JTextField nameField, emailField, phoneField;
-        private JTextArea addressArea;
+        private JTextArea addressArea; // Keep for simple address display
         private JButton changePicButton, editButton, saveButton, cancelButton, closeButton;
+        private JButton manageAddressesButton; // New button for address management
         private File selectedImageFile = null;
         private String currentImagePath = null;
-        // private boolean editMode = false; // No longer needed, state handled by button/field enabled state
 
         public ProfileDialog(JFrame parent, int customerId) {
             super(parent, "Your Profile", true);
             this.dialogCustomerId = customerId;
-            setSize(500, 650);
+            setSize(500, 650); // Adjusted size for new button
             setLayout(new BorderLayout(10, 10));
             getContentPane().setBackground(ThemeColors.BACKGROUND);
             setLocationRelativeTo(parent);
@@ -4397,7 +4278,6 @@ public class CustomerFrame extends JFrame {
             picturePanel.add(pictureCenterPanel, BorderLayout.CENTER);
 
             changePicButton = createStyledButton("Change Picture", ThemeColors.SECONDARY);
-            // Action listener IS correctly added here:
             changePicButton.addActionListener(e -> chooseProfilePicture());
             JPanel changeButtonPanel = new JPanel(new FlowLayout(FlowLayout.CENTER));
             changeButtonPanel.setOpaque(false);
@@ -4419,6 +4299,8 @@ public class CustomerFrame extends JFrame {
             emailField = createProfileTextField();
             phoneField = createProfileTextField();
             addressArea = createProfileTextArea();
+            addressArea.setText("Manage addresses using the button below."); // Placeholder text
+            addressArea.setEditable(false); // Address area is display-only
 
             int y = 0;
             gbc.gridx = 0; gbc.gridy = y++; formPanel.add(createFormLabel("Name:"), gbc);
@@ -4430,15 +4312,35 @@ public class CustomerFrame extends JFrame {
             gbc.gridx = 0; gbc.gridy = y++; formPanel.add(createFormLabel("Phone:"), gbc);
             gbc.gridx = 1; gbc.weightx = 1.0; formPanel.add(phoneField, gbc); gbc.weightx = 0.0;
 
+            // --- Address Display (Read-only) ---
             gbc.gridx = 0; gbc.gridy = y++; gbc.anchor = GridBagConstraints.NORTHWEST;
             formPanel.add(createFormLabel("Address:"), gbc);
             gbc.gridx = 1; gbc.weightx = 1.0; gbc.fill = GridBagConstraints.BOTH; gbc.weighty = 1.0;
             JScrollPane addressScrollPane = new JScrollPane(addressArea);
-            styleScrollPane(addressScrollPane);
-            addressScrollPane.setPreferredSize(new Dimension(200, 80));
+            CustomerFrame.styleScrollPane(addressScrollPane); // Use CustomerFrame's static method
+            addressScrollPane.setPreferredSize(new Dimension(200, 60)); // Smaller height
+            // Use non-editable theme colors for address area
+            addressArea.setBackground(ThemeColors.CARD_BG); // Same as non-edit fields
+            addressArea.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(ThemeColors.SECONDARY, 1),
+                BorderFactory.createEmptyBorder(8, 8, 8, 8)
+            ));
             formPanel.add(addressScrollPane, gbc); gbc.weighty = 0.0; gbc.fill = GridBagConstraints.HORIZONTAL; gbc.anchor = GridBagConstraints.WEST;
 
+
+            // --- Manage Addresses Button ---
+             y++; // Increment row
+             gbc.gridx = 1; // Place button under the address area, aligned right
+             gbc.gridy = y;
+             gbc.anchor = GridBagConstraints.EAST; // Align button right
+             gbc.fill = GridBagConstraints.NONE; // Don't stretch button
+             gbc.weightx = 0.0; // Don't take extra horizontal space
+             manageAddressesButton = createStyledButton("Manage Addresses", ThemeColors.ACCENT);
+             manageAddressesButton.addActionListener(e -> openAddressManagementDialog());
+             formPanel.add(manageAddressesButton, gbc);
+
             add(formPanel, BorderLayout.CENTER);
+
 
             // --- Bottom Panel: Buttons ---
             JPanel bottomButtonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 10));
@@ -4448,8 +4350,9 @@ public class CustomerFrame extends JFrame {
             editButton = createStyledButton("Edit Profile", ThemeColors.PRIMARY);
             saveButton = createStyledButton("Save Changes", ThemeColors.PRIMARY);
             cancelButton = createStyledButton("Cancel Edit", ThemeColors.SECONDARY);
-            closeButton = createStyledButton("Close", ThemeColors.CARD_BG);
-            closeButton.setForeground(ThemeColors.TEXT);
+            // FIX: Use ThemeColors.SECONDARY or another defined color for Close button BG
+            closeButton = createStyledButton("Close", ThemeColors.SECONDARY);
+            // closeButton.setForeground(ThemeColors.TEXT); // Keep if SECONDARY is dark, remove/adjust if light
 
             saveButton.setVisible(false); // Initially hidden
             cancelButton.setVisible(false); // Initially hidden
@@ -4467,7 +4370,19 @@ public class CustomerFrame extends JFrame {
             add(bottomButtonPanel, BorderLayout.SOUTH);
 
             loadProfileData();
-            toggleEditMode(false); // Start in non-edit mode (this correctly disables changePicButton initially)
+            toggleEditMode(false); // Start in non-edit mode
+        }
+
+        private void openAddressManagementDialog() {
+             // Use 'this' ProfileDialog as the parent Window for the AddressManagementDialog
+             AddressManager profileAddrManager = new AddressManager(this, dialogCustomerId);
+             Address currentDefaultAddr = profileAddrManager.getDefaultAddress();
+
+             CheckoutFrame.AddressManagementDialog dialog = new CheckoutFrame.AddressManagementDialog(this, dialogCustomerId, profileAddrManager, currentDefaultAddr);
+             dialog.setVisible(true);
+
+             // After the dialog closes, reload the profile data to reflect potential address changes
+             loadProfileData();
         }
 
         private JTextField createProfileTextField() {
@@ -4508,7 +4423,8 @@ public class CustomerFrame extends JFrame {
         }
 
         private void loadProfileData() {
-            String sql = "SELECT name, email, phone, address, profile_picture_path FROM customers WHERE id = ?";
+            // Load basic info
+            String sql = "SELECT name, email, phone, profile_picture_path FROM customers WHERE id = ?";
             try (Connection conn = DBConnection.connect();
                  PreparedStatement stmt = conn.prepareStatement(sql)) {
 
@@ -4519,10 +4435,19 @@ public class CustomerFrame extends JFrame {
                     nameField.setText(rs.getString("name"));
                     emailField.setText(rs.getString("email"));
                     phoneField.setText(rs.getString("phone"));
-                    addressArea.setText(rs.getString("address"));
                     currentImagePath = rs.getString("profile_picture_path");
-
                     loadProfilePicture(currentImagePath);
+
+                     // Load and display default address (read-only)
+                     // Create a new AddressManager instance specifically for this dialog's use
+                     AddressManager profileAddrManager = new AddressManager(this, dialogCustomerId);
+                     Address defaultAddr = profileAddrManager.getDefaultAddress();
+                     if (defaultAddr != null) {
+                         // Display simplified address string
+                         addressArea.setText(defaultAddr.getFormattedAddress());
+                     } else {
+                         addressArea.setText("No default address set. Use 'Manage Addresses'.");
+                     }
 
                 } else {
                     JOptionPane.showMessageDialog(this, "Customer data not found.", "Error", JOptionPane.ERROR_MESSAGE);
@@ -4546,7 +4471,7 @@ public class CustomerFrame extends JFrame {
              }
 
              // If loading failed or image is invalid, use placeholder
-             if (profileIcon == null || !isIconValid(profileIcon)) {
+             if (profileIcon == null || !isIconValid(profileIcon)) { // Use CustomerFrame's static method
                   profileIcon = createPlaceholderIcon("\uD83D\uDC64", size); // User emoji placeholder
                   profilePicLabel.setText(null); // Remove any text
                   profilePicLabel.setIcon(profileIcon);
@@ -4596,7 +4521,7 @@ public class CustomerFrame extends JFrame {
                 try {
                     // Preview the selected image
                     ImageIcon previewIcon = new ImageIcon(selectedImageFile.toURI().toURL());
-                     if (isIconValid(previewIcon)) {
+                     if (isIconValid(previewIcon)) { // Use public static method
                          // Scale and display preview
                          Image scaledImage = previewIcon.getImage().getScaledInstance(150, 150, Image.SCALE_SMOOTH);
                          profilePicLabel.setIcon(new ImageIcon(scaledImage));
@@ -4620,7 +4545,7 @@ public class CustomerFrame extends JFrame {
             nameField.setEditable(enable);
             emailField.setEditable(enable);
             phoneField.setEditable(enable);
-            addressArea.setEditable(enable);
+            // addressArea.setEditable(enable); // Address is managed separately
 
             // --- FIX: Enable/Disable 'Change Picture' button based on edit mode ---
             changePicButton.setEnabled(enable); // THIS IS THE CRUCIAL LINE
@@ -4636,16 +4561,20 @@ public class CustomerFrame extends JFrame {
             nameField.setBackground(bgColor); nameField.setBorder(border);
             emailField.setBackground(bgColor); emailField.setBorder(border);
             phoneField.setBackground(bgColor); phoneField.setBorder(border);
-            addressArea.setBackground(bgColor); // Set background for text area
+            // addressArea.setBackground(bgColor); // Address area keeps non-edit style
+            // addressArea.setBorder(border); // Address area keeps non-edit style
 
-             // Apply border to the scroll pane containing the text area for consistency
+
+             // Apply border to the scroll pane containing the text area for consistency (but keep non-edit border color)
+            /*
              Component scrollPaneComp = addressArea.getParent(); // Get the viewport
              if (scrollPaneComp instanceof JViewport) {
                  scrollPaneComp = scrollPaneComp.getParent(); // Get the scroll pane
                  if (scrollPaneComp instanceof JScrollPane) {
-                    ((JScrollPane) scrollPaneComp).setBorder(BorderFactory.createLineBorder(borderColor, 1));
+                    ((JScrollPane) scrollPaneComp).setBorder(BorderFactory.createLineBorder(ThemeColors.SECONDARY, 1)); // Always use non-edit border
                  } else { addressArea.setBorder(border); } // Fallback if structure is different
              } else { addressArea.setBorder(border); } // Fallback
+            */
 
 
             // Toggle button visibility
@@ -4653,6 +4582,10 @@ public class CustomerFrame extends JFrame {
             saveButton.setVisible(enable);
             saveButton.setEnabled(enable); // Enable Save button when entering edit mode
             cancelButton.setVisible(enable);
+
+            // Disable address management button during edit mode for basic info
+            manageAddressesButton.setEnabled(!enable);
+
 
             // If exiting edit mode (cancelling or saving successfully)
             if (!enable) {
@@ -4662,7 +4595,7 @@ public class CustomerFrame extends JFrame {
                      // This means save just happened, don't reload (data is already current)
                  } else {
                      // This means Cancel was clicked or initial load
-                     loadProfileData(); // Reloads all data from DB, including original picture
+                     loadProfileData(); // Reloads all data from DB, including original picture and default address
                      selectedImageFile = null; // Discard selected file if cancelled
                  }
             } else {
@@ -4675,7 +4608,7 @@ public class CustomerFrame extends JFrame {
             String newName = nameField.getText().trim();
             String newEmail = emailField.getText().trim();
             String newPhone = phoneField.getText().trim();
-            String newAddress = addressArea.getText().trim();
+            // String newAddress = addressArea.getText().trim(); // Address not edited here
 
             // Basic Validation
             if (newName.isEmpty() || newEmail.isEmpty()) {
@@ -4737,7 +4670,8 @@ public class CustomerFrame extends JFrame {
             }
 
             // --- Database Update ---
-            String sql = "UPDATE customers SET name = ?, email = ?, phone = ?, address = ?, profile_picture_path = ? WHERE id = ?";
+            // Update only basic info, address is managed separately
+            String sql = "UPDATE customers SET name = ?, email = ?, phone = ?, profile_picture_path = ? WHERE id = ?";
             Connection conn = null;
             PreparedStatement stmt = null;
             boolean updateSuccess = false;
@@ -4747,14 +4681,13 @@ public class CustomerFrame extends JFrame {
                 stmt.setString(1, newName);
                 stmt.setString(2, newEmail);
                 stmt.setString(3, newPhone);
-                stmt.setString(4, newAddress);
                 // Set the new image path (or null if none was selected/error occurred)
                 if (newImagePath != null && !newImagePath.isEmpty()) {
-                    stmt.setString(5, newImagePath);
+                    stmt.setString(4, newImagePath);
                 } else {
-                    stmt.setNull(5, Types.VARCHAR); // Store NULL if no image path
+                    stmt.setNull(4, Types.VARCHAR); // Store NULL if no image path
                 }
-                stmt.setInt(6, dialogCustomerId);
+                stmt.setInt(5, dialogCustomerId); // ID is the 5th parameter now
 
                 int rowsAffected = stmt.executeUpdate();
                 if (rowsAffected > 0) {
@@ -4797,7 +4730,7 @@ public class CustomerFrame extends JFrame {
                  System.err.println("Error updating profile: " + ex.getMessage());
                  ex.printStackTrace();
                  // Check for unique constraint violation (e.g., email already exists)
-                 if (ex.getSQLState().startsWith("23")) { // SQLState for Integrity Constraint Violation
+                 if (ex.getSQLState() != null && ex.getSQLState().startsWith("23")) { // SQLState for Integrity Constraint Violation
                     JOptionPane.showMessageDialog(this, "Email address '" + newEmail + "' is already in use by another account.", "Update Error", JOptionPane.ERROR_MESSAGE);
                  } else {
                     JOptionPane.showMessageDialog(this, "Error updating profile in database.", "Database Error", JOptionPane.ERROR_MESSAGE);
